@@ -24,11 +24,21 @@
 /* Include ZSTD compression */
 #define MZIP_ENABLE_ZSTD 1
 
+/* LZFSE compression support */
+#define MZIP_ENABLE_LZFSE 1
+
+/* LZ4 compression support (using radare2's rlz4.c) */
+/*
+#define MZIP_ENABLE_LZ4 1
+*/
+
+/* LZMA compression support */
+#define MZIP_ENABLE_LZMA 1
+
+/* Brotli compression support */
+#define MZIP_ENABLE_BROTLI 1
+
 /* Future algorithms that could be supported */
-/* #define MZIP_ENABLE_LZMA 1 */
-/* #define MZIP_ENABLE_BROTLI 1 */
-/* #define MZIP_ENABLE_LZ4 1 */
-/* #define MZIP_ENABLE_LZFSE 1 */
 
 /* 
  * Compression algorithm ID numbers (from ZIP spec)
