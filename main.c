@@ -10,15 +10,40 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include "config.h"
 #include "mzip.h"
 
 static void usage(void) {
     puts("mzip – minimal ZIP reader/writer (mzip.h demo)\n"
-         "Usage: mzip [-l | -x | -c | -a] <archive.zip> [files...]\n"
+         "Usage: mzip [-l | -x | -c | -a] <archive.zip> [files...] [options]\n"
          "  -l   List contents\n"
          "  -x   Extract all files into current directory\n"
          "  -c   Create new archive with specified files\n"
-         "  -a   Add files to existing archive");
+         "  -a   Add files to existing archive\n\n"
+         "Options:");
+
+    /* Show compression options based on what's enabled in config */
+#ifdef MZIP_ENABLE_STORE
+    puts("  -z0  Store files without compression");
+#endif
+#ifdef MZIP_ENABLE_DEFLATE
+    puts("  -z1  Use deflate compression (default)");
+#endif
+#ifdef MZIP_ENABLE_ZSTD
+    puts("  -z2  Use zstd compression");
+#endif
+#ifdef MZIP_ENABLE_LZMA
+    puts("  -z3  Use LZMA compression");
+#endif
+#ifdef MZIP_ENABLE_LZ4
+    puts("  -z4  Use LZ4 compression");
+#endif
+#ifdef MZIP_ENABLE_BROTLI
+    puts("  -z5  Use Brotli compression");
+#endif
+#ifdef MZIP_ENABLE_LZFSE
+    puts("  -z6  Use LZFSE compression");
+#endif
 }
 
 static int list_files(const char *path) {
@@ -42,7 +67,7 @@ static int list_files(const char *path) {
 }
 
 /* Function to create a new ZIP archive or add files to existing one */
-static int create_or_add_files(const char *path, char **files, int num_files, int create_mode) {
+static int create_or_add_files(const char *path, char **files, int num_files, int create_mode, int compression_method) {
     int err = 0;
     int flags = create_mode ? (ZIP_CREATE | ZIP_TRUNCATE) : (ZIP_CREATE);
     
@@ -113,8 +138,8 @@ static int create_or_add_files(const char *path, char **files, int num_files, in
             continue;
         }
         
-        /* For simplicity, use store (no compression) */
-        if (zip_set_file_compression(za, idx, 0, 0) != 0) {
+        /* Set compression method based on user selection */
+        if (zip_set_file_compression(za, idx, compression_method, 0) != 0) {
             fprintf(stderr, "Warning: Could not set compression for: %s\n", filename);
         }
         
@@ -167,6 +192,13 @@ int main(int argc, char **argv) {
     }
 
     int mode_list=0, mode_extract=0, mode_create=0, mode_append=0;
+    
+    /* Set default compression method based on available algorithms */
+    int compression_method = 0; /* Default to store */
+#ifdef MZIP_ENABLE_DEFLATE
+    compression_method = MZIP_METHOD_DEFLATE; /* Default to deflate if available */
+#endif
+    
     if (strcmp(argv[1], "-l") == 0) mode_list = 1;
     else if (strcmp(argv[1], "-x") == 0) mode_extract = 1;
     else if (strcmp(argv[1], "-c") == 0) mode_create = 1;
@@ -177,6 +209,64 @@ int main(int argc, char **argv) {
     }
 
     const char *zip_path = argv[2];
+    
+    /* Process additional options */
+    int i;
+    int filter_count = 0;
+    char **files_to_add = NULL;
+    int num_files = 0;
+    
+    if (mode_create || mode_append) {
+        /* Count actual files vs option flags */
+        files_to_add = &argv[3];
+        num_files = argc - 3;
+        
+        for (i = 3; i < argc; i++) {
+            if (strncmp(argv[i], "-z", 2) == 0) {
+                filter_count++;
+            }
+        }
+        num_files -= filter_count;
+    }
+    
+    /* Find compression options */
+    for (i = 3; i < argc; i++) {
+#ifdef MZIP_ENABLE_STORE
+        if (strcmp(argv[i], "-z0") == 0) {
+            compression_method = MZIP_METHOD_STORE; /* Store - no compression */
+        } 
+#endif
+#ifdef MZIP_ENABLE_DEFLATE
+        else if (strcmp(argv[i], "-z1") == 0) {
+            compression_method = MZIP_METHOD_DEFLATE; /* Deflate */
+        } 
+#endif
+#ifdef MZIP_ENABLE_ZSTD
+        else if (strcmp(argv[i], "-z2") == 0) {
+            compression_method = MZIP_METHOD_ZSTD; /* Zstd */
+        }
+#endif
+#ifdef MZIP_ENABLE_LZMA
+        else if (strcmp(argv[i], "-z3") == 0) {
+            compression_method = MZIP_METHOD_LZMA; /* LZMA */
+        }
+#endif
+#ifdef MZIP_ENABLE_LZ4
+        else if (strcmp(argv[i], "-z4") == 0) {
+            compression_method = MZIP_METHOD_LZ4; /* LZ4 */
+        }
+#endif
+#ifdef MZIP_ENABLE_BROTLI
+        else if (strcmp(argv[i], "-z5") == 0) {
+            compression_method = MZIP_METHOD_BROTLI; /* Brotli */
+        }
+#endif
+#ifdef MZIP_ENABLE_LZFSE
+        else if (strcmp(argv[i], "-z6") == 0) {
+            compression_method = MZIP_METHOD_LZFSE; /* LZFSE */
+        }
+#endif
+    }
 
     if (mode_list) {
         if (argc != 3) {
@@ -197,7 +287,7 @@ int main(int argc, char **argv) {
             usage();
             return 1;
         }
-        return create_or_add_files(zip_path, &argv[3], argc - 3, mode_create);
+        return create_or_add_files(zip_path, files_to_add, num_files, mode_create, compression_method);
     }
 
     usage();

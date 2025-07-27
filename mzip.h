@@ -37,7 +37,14 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+
+/* Include configuration settings */
+#include "config.h"
+
+/* Include compression algorithms based on config */
+#ifdef MZIP_ENABLE_DEFLATE
 #include <zlib.h>
+#endif
 
 /* ----  minimal type aliases (keep public names identical to libzip) ---- */
 
@@ -298,9 +305,13 @@ static int mzip_extract_entry(zip_t *za, struct mzip_entry *e, uint8_t **out_buf
     }
 
     uint8_t *ubuf;
-    if (e->method == 0) { /* stored – nothing to inflate */
+#ifdef MZIP_ENABLE_STORE
+    if (e->method == MZIP_METHOD_STORE) { /* stored – nothing to inflate */
         ubuf = cbuf;
-    } else if (e->method == 8) { /* deflate */
+    }
+#endif
+#ifdef MZIP_ENABLE_DEFLATE
+    else if (e->method == MZIP_METHOD_DEFLATE) { /* deflate */
         ubuf = (uint8_t*)malloc(e->uncomp_size);
         if (!ubuf) { free(cbuf); return -1; }
 
@@ -319,7 +330,33 @@ static int mzip_extract_entry(zip_t *za, struct mzip_entry *e, uint8_t **out_buf
             free(cbuf); free(ubuf); return -1;
         }
         free(cbuf);
-    } else {
+    }
+#endif
+#ifdef MZIP_ENABLE_ZSTD
+    else if (e->method == MZIP_METHOD_ZSTD) { /* zstd */
+        ubuf = (uint8_t*)malloc(e->uncomp_size);
+        if (!ubuf) { free(cbuf); return -1; }
+
+        z_stream strm = {0};
+        strm.next_in   = cbuf;
+        strm.avail_in  = e->comp_size;
+        strm.next_out  = ubuf;
+        strm.avail_out = e->uncomp_size;
+
+        if (zstdDecompressInit(&strm) != Z_OK) {
+            free(cbuf); free(ubuf); return -1;
+        }
+        int zret = zstdDecompress(&strm, Z_FINISH);
+        zstdDecompressEnd(&strm);
+        if (zret != Z_STREAM_END || strm.total_out != e->uncomp_size) {
+            free(cbuf);
+            free(ubuf);
+            return -1;
+        }
+        free(cbuf);
+    }
+#endif
+    else {
         free(cbuf);
         return -1; /* unsupported method */
     }
@@ -460,8 +497,26 @@ int zip_set_file_compression(zip_t *za, zip_uint64_t index, zip_int32_t comp, zi
     
     if (!za || index >= za->n_entries || za->mode != 1) return -1;
     
-    /* Only support store (0) and deflate (8) methods */
-    if (comp != 0 && comp != 8) return -1;
+    /* Check if the requested compression method is supported */
+#ifdef MZIP_ENABLE_STORE
+    if (comp == MZIP_METHOD_STORE) {
+        /* Store is always supported */
+    } 
+#endif
+#ifdef MZIP_ENABLE_DEFLATE
+    else if (comp == MZIP_METHOD_DEFLATE) {
+        /* Deflate is supported */
+    } 
+#endif
+#ifdef MZIP_ENABLE_ZSTD
+    else if (comp == MZIP_METHOD_ZSTD) {
+        /* Zstd is supported */
+    } 
+#endif
+    else {
+        /* Unsupported compression method */
+        return -1;
+    }
     
     za->entries[index].method = (uint16_t)comp;
     return 0;

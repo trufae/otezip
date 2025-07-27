@@ -1,5 +1,5 @@
 /* mzip.h – Minimalistic libzip subset replacement
- * Version: 0.2 (2025-07-27)
+ * Version: 0.3 (2025-07-27)
  *
  * This header-only library provides a tiny subset of the libzip API so that
  * existing code using **only** the following symbols keeps compiling:
@@ -25,8 +25,8 @@
  *   #define MZIP_IMPLEMENTATION **once** in **one** translation unit *before*
  *   including this header to generate the implementation.
  *
- *   Compile & link with zlib:
- *     gcc -std=c99 your_app.c -lz
+ *   Compilation is simple, no external dependencies:
+ *     gcc -std=c99 your_app.c
  *
  * License: MIT / 0-BSD – do whatever you want; attribution appreciated.
  */
@@ -37,7 +37,14 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <zlib.h>
+#include "mzip.h"
+
+#if MZIP_ENABLE_DEFLATE
+#include "deflate.inc.c"
+#endif
+#if MZIP_ENABLE_ZSTD
+#include "zstd.inc.c"
+#endif
 
 /* ----  minimal type aliases (keep public names identical to libzip) ---- */
 
