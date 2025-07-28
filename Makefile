@@ -21,7 +21,7 @@ LIBS = -lz
 # Main targets
 all: mzip
 
-mzip: main.c config.h deflate.inc.c
+mzip: main.c config.h deflate.inc.c crc32.inc.c
 	$(CC) $(CFLAGS) $(COMPRESSION_FLAGS) -o $@ main.c mzip.c $(LIBS)
 
 # Enable all supported compression methods
