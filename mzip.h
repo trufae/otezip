@@ -47,6 +47,10 @@ struct mzip_entry {
     uint32_t   comp_size;
     uint32_t   uncomp_size;
     uint16_t   method;              /* 0=store, 8=deflate                   */
+    uint32_t   crc32;               /* CRC-32 checksum of uncompressed data */
+    uint16_t   file_time;           /* DOS format file time */
+    uint16_t   file_date;           /* DOS format file date */
+    uint32_t   external_attr;       /* External file attributes (permissions) */
 };
 
 struct mzip_archive {

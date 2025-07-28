@@ -54,6 +54,7 @@ test_zip() {
 		cd ..
 		rm -rf data
 	}
+	fini
 	return 0
 pwd
 	{
