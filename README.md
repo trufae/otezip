@@ -6,7 +6,7 @@ This is a minimalistic implementation of the ZIP file format, designed to be sma
 
 ## Features
 
-- Header-only library with minimal dependencies
+- Small library with minimal dependencies
 - Full read/write support for ZIP archives
 - Zero dependencies (includes a tiny deflate implementation)
 - Simple API compatible with a subset of libzip
