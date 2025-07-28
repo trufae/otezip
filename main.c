@@ -181,6 +181,7 @@ static int extract_all(const char *path) {
             continue;
         }
 
+        /* Write data and add proper termination for text files */
         fwrite(zf->data, 1, zf->size, out);
         fclose(out);
         zip_fclose(zf);
