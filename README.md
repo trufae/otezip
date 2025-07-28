@@ -2,6 +2,8 @@
 
 This is a minimalistic implementation of the ZIP file format, designed to be small, portable, and dependency-free.
 
+**NOTE** This code has been initially written by Claude Code
+
 ## Features
 
 - Header-only library with minimal dependencies
