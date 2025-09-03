@@ -229,13 +229,15 @@ int lzmaCompress(z_stream *strm, int flush) {
         if (strm->avail_out < LZMA_HEADER_SIZE) {
             return Z_BUF_ERROR;
         }
-        
+
         /* Will be updated later */
         memcpy(strm->next_out, ctx->properties, LZMA_PROPS_SIZE);
-        
-        /* Write uncompressed size as 8-byte integer */
+
+        /* Write uncompressed size as 8-byte LE integer.
+         * Use the input size we are about to consume (avail_in) as the known size. */
+        uint64_t uncomp = (uint64_t)strm->avail_in;
         for (int i = 0; i < 8; i++) {
-            strm->next_out[LZMA_PROPS_SIZE + i] = (strm->total_in >> (i * 8)) & 0xFF;
+            strm->next_out[LZMA_PROPS_SIZE + i] = (uint8_t)((uncomp >> (i * 8)) & 0xFF);
         }
         
         strm->next_out += LZMA_HEADER_SIZE;
@@ -255,7 +257,7 @@ int lzmaCompress(z_stream *strm, int flush) {
         size_t max_output = strm->avail_out;
         
         /* Make sure we have enough output space */
-        if (max_output < input_size + 16) {  /* Rough estimate for overhead */
+        if (max_output < input_size + 16 + LZMA_HEADER_SIZE) {  /* Ensure ample space */
             return Z_BUF_ERROR;
         }
         

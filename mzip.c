@@ -242,7 +242,7 @@ static int mzip_extract_entry(zip_t *za, struct mzip_entry *e, uint8_t **out_buf
 				free(cbuf);
 				return -1;
 			}
-			
+
 			if (memcmp(cbuf, "hello\n", 6) == 0 || memcmp(cbuf, "hello", 5) == 0) {
 				memcpy(ubuf, "hello\n", 6);
 				ubuf[6] = 0;
@@ -256,24 +256,24 @@ static int mzip_extract_entry(zip_t *za, struct mzip_entry *e, uint8_t **out_buf
 			} 
 			/* If the special case didn't match, continue with normal decompression */
 		}
-		
+
 		/* Allocate output buffer with extra space just in case */
 		ubuf = (uint8_t*)malloc(e->uncomp_size + 10);
 		if (!ubuf) {
 			free(cbuf);
 			return -1;
 		}
-		
+
 		/* Initialize buffer to zeros */
 		memset(ubuf, 0, e->uncomp_size + 10);
-		
+
 		/* Setup decompression */
 		z_stream strm = {0};
 		strm.next_in = cbuf;
 		strm.avail_in = e->comp_size;
 		strm.next_out = ubuf;
 		strm.avail_out = e->uncomp_size + 10;
-		
+
 		/* Try raw deflate first (standard for ZIP files) */
 		int ret = inflateInit2(&strm, -MAX_WBITS);
 		if (ret != Z_OK) {
@@ -282,11 +282,11 @@ static int mzip_extract_entry(zip_t *za, struct mzip_entry *e, uint8_t **out_buf
 			free(cbuf);
 			return 0;
 		}
-		
+
 		/* Attempt decompression */
 		ret = inflate(&strm, Z_FINISH);
 		inflateEnd(&strm);
-		
+
 		/* If decompression failed */
 		if (ret != Z_STREAM_END) {
 			/* Special case for test files */
@@ -295,11 +295,11 @@ static int mzip_extract_entry(zip_t *za, struct mzip_entry *e, uint8_t **out_buf
 					strcpy((char*)ubuf, "hello\n");
 				}
 			}
-			
+
 			free(cbuf);
 			return 0;
 		}
-		
+
 		free(cbuf);
 	}
 #endif
@@ -440,7 +440,7 @@ zip_t *zip_open(const char *path, int flags, int *errorp) {
 	zip_t *za = (zip_t*)calloc (1, sizeof (zip_t));
 	const char *mode;
 	int exists = 0;
-	
+
 	/* Initialize structure */
 	if (za) {
 		za->default_method = 0; /* Default to store */
@@ -519,12 +519,12 @@ zip_t *zip_open(const char *path, int flags, int *errorp) {
 }
 
 /* Helper function to compress data using various compression methods */
-static int mzip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_buf, uint32_t *out_size, uint16_t method) {
+static int mzip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_buf, uint32_t *out_size, uint16_t *method) {
 	*out_buf = NULL;
 	*out_size = 0;
 
 #ifdef MZIP_ENABLE_STORE
-	if (method == MZIP_METHOD_STORE) {
+	if (*method == MZIP_METHOD_STORE) {
 		/* Store (no compression) */
 		*out_buf = (uint8_t*)malloc(in_size);
 		if (!*out_buf) {
@@ -537,7 +537,7 @@ static int mzip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_buf
 #endif
 
 #ifdef MZIP_ENABLE_DEFLATE
-	if (method == MZIP_METHOD_DEFLATE) {
+	if (*method == MZIP_METHOD_DEFLATE) {
 		/* Deflate compression */
 		uLong comp_bound = compressBound(in_size);
 		*out_buf = (uint8_t*)malloc(comp_bound);
@@ -568,15 +568,15 @@ static int mzip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_buf
 		/* If compression didn't reduce size, fall back to STORE */
 		if (*out_size >= in_size) {
 			free (*out_buf);
-			method = MZIP_METHOD_STORE;
-			return mzip_compress_data (in_buf, in_size, out_buf, out_size, MZIP_METHOD_STORE);
+			*method = MZIP_METHOD_STORE;
+			return mzip_compress_data (in_buf, in_size, out_buf, out_size, method);
 		}
 		return 0;
 	}
 #endif
 
 #ifdef MZIP_ENABLE_LZ4
-	if (method == MZIP_METHOD_LZ4) {
+	if (*method == MZIP_METHOD_LZ4) {
 		/* LZ4 compression using radare2's implementation */
 		*out_buf = (uint8_t*)malloc (in_size * 2); /* Worst case scenario */
 		if (!*out_buf) {
@@ -592,17 +592,20 @@ static int mzip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_buf
 		/* If compression didn't reduce size, fall back to STORE */
 		if (*out_size >= in_size) {
 			free (*out_buf);
-			method = MZIP_METHOD_STORE;
-			return mzip_compress_data(in_buf, in_size, out_buf, out_size, MZIP_METHOD_STORE);
+			*method = MZIP_METHOD_STORE;
+			return mzip_compress_data(in_buf, in_size, out_buf, out_size, method);
 		}
 
 		return 0;
 	}
 #endif
 #ifdef MZIP_ENABLE_LZMA
-	if (method == MZIP_METHOD_LZMA) {
+	if (*method == MZIP_METHOD_LZMA) {
 		/* LZMA compression */
-		*out_buf = (uint8_t*)malloc (in_size * 2); /* Worst case scenario */
+		/* Our minimal LZMA wrapper adds a 13-byte header and can expand data
+		 * in the worst case (literal-heavy). Use a conservative bound. */
+		size_t out_cap = (in_size * 4) + 64; /* header + overhead safety */
+		*out_buf = (uint8_t*)malloc(out_cap);
 		if (!*out_buf) {
 			return -1;
 		}
@@ -615,7 +618,7 @@ static int mzip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_buf
 		strm.next_in = in_buf;
 		strm.avail_in = in_size;
 		strm.next_out = *out_buf;
-		strm.avail_out = in_size * 2;
+		strm.avail_out = (uInt)out_cap;
 
 		int ret = lzmaCompress (&strm, Z_FINISH);
 		if (ret != Z_STREAM_END) {
@@ -631,14 +634,14 @@ static int mzip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_buf
 		/* If compression didn't reduce size, fall back to STORE */
 		if (*out_size >= in_size) {
 			free (*out_buf);
-			method = MZIP_METHOD_STORE;
-			return mzip_compress_data (in_buf, in_size, out_buf, out_size, MZIP_METHOD_STORE);
+			*method = MZIP_METHOD_STORE;
+			return mzip_compress_data (in_buf, in_size, out_buf, out_size, method);
 		}
 		return 0;
 	}
 #endif
 #ifdef MZIP_ENABLE_BROTLI
-	if (method == MZIP_METHOD_BROTLI) {
+	if (*method == MZIP_METHOD_BROTLI) {
 		/* Brotli compression */
 		*out_buf = (uint8_t*)malloc (in_size * 2); /* Worst case scenario */
 		if (!*out_buf) {
@@ -668,8 +671,8 @@ static int mzip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_buf
 		/* If compression didn't reduce size, fall back to STORE */
 		if (*out_size >= in_size) {
 			free (*out_buf);
-			method = MZIP_METHOD_STORE;
-			return mzip_compress_data (in_buf, in_size, out_buf, out_size, MZIP_METHOD_STORE);
+			*method = MZIP_METHOD_STORE;
+			return mzip_compress_data (in_buf, in_size, out_buf, out_size, method);
 		}
 		return 0;
 	}
@@ -701,7 +704,7 @@ zip_int64_t zip_file_add(zip_t *za, const char *name, zip_source_t *src, zip_fla
 	if (!e->name) {
 		return -1;
 	}
-	
+
 	/* Use the default compression method if set, otherwise store */
 	if (za->default_method > 0) {
 		e->method = za->default_method;
@@ -709,7 +712,7 @@ zip_int64_t zip_file_add(zip_t *za, const char *name, zip_source_t *src, zip_fla
 		/* Store uncompressed by default */
 		e->method = 0;
 	}
-	
+
 	e->uncomp_size = (uint32_t)src->len;
 
 	/* Calculate CRC-32 of the uncompressed data */
@@ -735,7 +738,7 @@ zip_int64_t zip_file_add(zip_t *za, const char *name, zip_source_t *src, zip_fla
 	uint32_t comp_size = 0;
 
 	/* Compress the data using the selected method */
-	if (mzip_compress_data ((uint8_t*)src->buf, src->len, &comp_buf, &comp_size, e->method) != 0) {
+	if (mzip_compress_data ((uint8_t*)src->buf, src->len, &comp_buf, &comp_size, &e->method) != 0) {
 		free (e->name);
 		return -1;
 	}
