@@ -121,23 +121,8 @@ static int simple_lzma_compress(const uint8_t *src, size_t src_size,
         return 0;  /* Invalid input or not enough output capacity */
     }
 
-    /* Set LZMA properties - default conservative values */
-    props[0] = 0x5D;           /* Dictionary size: 2^(0x5D & 1F) = 2^29 = 512MB */
-    props[1] = 0x00;           /* LC = 0, LP = 0 */
-    props[2] = 0x00;           /* PB = 0 */
-    props[3] = 0x00;           /* Reserved */
-    props[4] = 0x01;           /* Version */
-    
-    /* Copy properties to output */
-    memcpy(dst, props, LZMA_PROPS_SIZE);
-    
-    /* Write uncompressed size as 8-byte integer */
-    for (int i = 0; i < 8; i++) {
-        dst[LZMA_PROPS_SIZE + i] = (src_size >> (i * 8)) & 0xFF;
-    }
-    
     /* For this minimal implementation, we'll do very simple RLE compression */
-    size_t dst_pos = LZMA_HEADER_SIZE;
+    size_t dst_pos = 0;
     size_t src_pos = 0;
     
     while (src_pos < src_size) {
@@ -248,9 +233,9 @@ int lzmaCompress(z_stream *strm, int flush) {
         /* Will be updated later */
         memcpy(strm->next_out, ctx->properties, LZMA_PROPS_SIZE);
         
-        /* Write uncompressed size as 8-byte integer (unknown for now) */
+        /* Write uncompressed size as 8-byte integer */
         for (int i = 0; i < 8; i++) {
-            strm->next_out[LZMA_PROPS_SIZE + i] = 0xFF;  /* Unknown size */
+            strm->next_out[LZMA_PROPS_SIZE + i] = (strm->total_in >> (i * 8)) & 0xFF;
         }
         
         strm->next_out += LZMA_HEADER_SIZE;

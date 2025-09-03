@@ -1,6 +1,6 @@
 CC ?= gcc
 CFLAGS ?= -O2 -Wall -Wextra
-LDFLAGS ?= -lz
+LDFLAGS ?=
 
 # Define test targets
 TESTS = test_deflate test_mzip_deflate
