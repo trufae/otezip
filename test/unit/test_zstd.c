@@ -3,27 +3,8 @@
 #include <string.h>
 #include <stdint.h>
 
-/* Define z_stream structure for compatibility */
-typedef struct z_stream_s {
-    uint8_t *next_in;
-    uint32_t avail_in;
-    uint32_t total_in;
-    uint8_t *next_out;
-    uint32_t avail_out;
-    uint32_t total_out;
-    void *state;
-    void *zalloc;
-    void *zfree;
-    void *opaque;
-} z_stream;
-
-#define Z_NULL NULL
-#define Z_OK 0
-#define Z_STREAM_END 1
-#define Z_STREAM_ERROR -2
-#define Z_BUF_ERROR -5
-#define Z_FINISH 4
-#define Z_DEFAULT_COMPRESSION 1
+/* Use the shared z_stream definition */
+#include "../../zstream.h"
 
 /* Include ZSTD implementation */
 #define MZIP_ENABLE_ZSTD
@@ -38,9 +19,6 @@ int test_zstd_compress_decompress() {
 
     /* Compress with ZSTD */
     z_stream c_strm = {0};
-    c_strm.zalloc = Z_NULL;
-    c_strm.zfree = Z_NULL;
-    c_strm.opaque = Z_NULL;
 
     if (zstdInit(&c_strm, Z_DEFAULT_COMPRESSION) != Z_OK) {
         printf("zstdInit failed\n");
@@ -68,9 +46,6 @@ int test_zstd_compress_decompress() {
 
     /* Now decompress */
     z_stream d_strm = {0};
-    d_strm.zalloc = Z_NULL;
-    d_strm.zfree = Z_NULL;
-    d_strm.opaque = Z_NULL;
 
     if (zstdDecompressInit(&d_strm) != Z_OK) {
         printf("zstdDecompressInit failed\n");
@@ -136,9 +111,6 @@ int test_zstd_large_data() {
 
     /* Compress */
     z_stream c_strm = {0};
-    c_strm.zalloc = Z_NULL;
-    c_strm.zfree = Z_NULL;
-    c_strm.opaque = Z_NULL;
 
     if (zstdInit(&c_strm, Z_DEFAULT_COMPRESSION) != Z_OK) {
         printf("zstdInit failed\n");
@@ -171,9 +143,6 @@ int test_zstd_large_data() {
 
     /* Decompress */
     z_stream d_strm = {0};
-    d_strm.zalloc = Z_NULL;
-    d_strm.zfree = Z_NULL;
-    d_strm.opaque = Z_NULL;
 
     if (zstdDecompressInit(&d_strm) != Z_OK) {
         printf("zstdDecompressInit failed\n");
