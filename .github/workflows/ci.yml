@@ -11,25 +11,75 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Build
-      run: make
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y meson ninja-build
 
-    - name: Run tests
-      run: make -C test
+      - name: Build
+        run: make
+
+      - name: Run tests
+        run: make test
+      - name: Run asan tests
+        run: make test2
 
   build-macos:
     runs-on: macos-latest
 
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Build
-      run: make
+      - name: Install dependencies
+        run: brew install meson ninja
 
-    - name: Run tests
-      run: make -C test
+      - name: Build
+        run: make
+
+      - name: Run tests
+        run: make -C test
+
+  test-make:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup MSYS2 (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-zlib mingw-w64-x86_64-meson mingw-w64-x86_64-ninja
+
+      - name: Install dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y meson ninja-build
+
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install meson ninja
+
+      - name: Test make build
+        if: matrix.os != 'windows-latest'
+        run: |
+          make clean
+          make
+          ls -la mzip
+          ./mzip --help
+
+      - name: Test make build (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: msys2 {0}
+        run: |
+          make clean
+          make
+          ls -la mzip.exe
+          ./mzip.exe --help
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -49,28 +99,37 @@ jobs:
             ext: .exe
 
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Setup MSYS2 (Windows)
-      if: matrix.os == 'windows-latest'
-      uses: msys2/setup-msys2@v2
-      with:
-        msystem: MINGW64
-        install: mingw-w64-x86_64-gcc mingw-w64-x86_64-zlib
+      - name: Setup MSYS2 (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-zlib mingw-w64-x86_64-meson mingw-w64-x86_64-ninja
 
-    - name: Build (Linux/macOS)
-      if: matrix.os != 'windows-latest'
-      run: make
+      - name: Install dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y meson ninja-build
 
-    - name: Build (Windows)
-      if: matrix.os == 'windows-latest'
-      shell: msys2 {0}
-      run: make
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install meson ninja
 
-    - name: Upload Release Asset
-      uses: softprops/action-gh-release@v1
-      with:
-        files: mzip${{ matrix.ext }}
-        name: mzip-${{ matrix.name }}${{ matrix.ext }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: make
+
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: msys2 {0}
+        run: make
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v1
+        with:
+          files: mzip${{ matrix.ext }}
+          name: mzip-${{ matrix.name }}${{ matrix.ext }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

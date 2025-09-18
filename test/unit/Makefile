@@ -8,7 +8,7 @@ TESTS = test_deflate test_mzip_deflate test_zstd test_lzfse
 all: $(TESTS)
 
 test_deflate: test_deflate.c
-	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -lz
 
 test_mzip_deflate: test_mzip_deflate.c
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)

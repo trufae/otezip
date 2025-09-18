@@ -52,11 +52,8 @@
 
 /* ------------- Data Structures ------------- */
 
-/* We'll use the existing z_stream from zlib */
-/* Forward declare the z_stream type if not included */
-#ifndef ZLIB_H
-typedef struct z_stream_s z_stream;
-#endif
+/* Unified z_stream declaration */
+#include "zstream.h"
 
 /* LZMA decompression context */
 typedef struct {

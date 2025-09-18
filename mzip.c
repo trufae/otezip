@@ -11,11 +11,14 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <fcntl.h>
 #include <string.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include "mzip.h"
+#include "zstream.h"
 
 #if MZIP_ENABLE_LZ4
 #include <r_util.h>
@@ -23,9 +26,11 @@
 
 #include "crc32.inc.c"
 /* Include compression algorithms based on config */
-#if MZIP_ENABLE_DEFLATE
-#include <zlib.h>
-#endif
+
+/* Pull in deflate implementation */
+#define MDEFLATE_IMPLEMENTATION
+#include "deflate.inc.c"
+
 #if MZIP_ENABLE_ZSTD
 #include "zstd.inc.c"
 #endif

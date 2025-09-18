@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include "zstream.h"
 
 typedef struct {
     int quality;

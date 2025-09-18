@@ -68,17 +68,20 @@
 
 /* ------------- Data Structures ------------- */
 
-typedef struct {
-	uint8_t *next_in;   /* Next input byte */
-	uint32_t avail_in;  /* Number of bytes available at next_in */
-	uint32_t total_in;  /* Total number of input bytes read so far */
+/* zlib-like basic typedefs used by callers */
+typedef unsigned long uLong;
+typedef unsigned int uInt;
 
-	uint8_t *next_out;  /* Next output byte */
-	uint32_t avail_out; /* Number of bytes available at next_out */
-	uint32_t total_out; /* Total number of bytes output so far */
+/* Conservative upper bound for deflate output size, zlib-compatible API */
+static inline uLong compressBound(uLong sourceLen) {
+    /* Conservative bound: input + 1/8 + fixed overhead */
+    uLong extra = (sourceLen >> 3) + 64u;
+    uLong bound = sourceLen + extra + 11u;
+    return (bound < sourceLen) ? sourceLen : bound;
+}
 
-	void *state;        /* Internal state */
-} z_stream;
+/* Unified z_stream definition */
+#include "zstream.h"
 
 /* ------------- Function Prototypes ------------- */
 
