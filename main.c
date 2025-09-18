@@ -204,6 +204,12 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 
+	/* Treat -h/--help as a successful request for usage information */
+	if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
+		usage();
+		return 0;
+	}
+
 	if (argc < 3) {
 		usage();
 		return 1;

@@ -84,6 +84,7 @@ int test_compress_decompress() {
 }
 
 int main(int argc, char *argv[]) {
+	(void)argc; (void)argv;
 	printf("Running deflate compression test...\n");
 	int result = test_compress_decompress();
 	return result;

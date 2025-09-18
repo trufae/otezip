@@ -217,6 +217,7 @@ int test_lzfse_large_data() {
 }
 
 int main(int argc, char *argv[]) {
+    (void)argc; (void)argv;
     printf("Running LZFSE basic test...\n");
     int result1 = test_lzfse_compress_decompress();
 

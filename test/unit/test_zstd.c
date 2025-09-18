@@ -188,6 +188,7 @@ int test_zstd_large_data() {
 }
 
 int main(int argc, char *argv[]) {
+    (void)argc; (void)argv;
     printf("Running ZSTD basic test...\n");
     int result1 = test_zstd_compress_decompress();
 
