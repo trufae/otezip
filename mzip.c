@@ -620,24 +620,28 @@ static int mzip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_buf
 		strm.next_out = *out_buf;
 		strm.avail_out = (uInt)out_cap;
 
-		int ret = lzmaCompress (&strm, Z_FINISH);
-		if (ret != Z_STREAM_END) {
-			lzmaEnd (&strm);
-			free (*out_buf);
-			*out_buf = NULL;
-			return -1;
-		}
+        int ret = lzmaCompress (&strm, Z_FINISH);
+        if (ret != Z_STREAM_END) {
+            /* If our minimal LZMA failed for this input, fall back to STORE
+             * instead of propagating an error. This keeps behavior robust
+             * for very large or pathological inputs. */
+            lzmaEnd (&strm);
+            free (*out_buf);
+            *out_buf = NULL;
+            *method = MZIP_METHOD_STORE;
+            return mzip_compress_data (in_buf, in_size, out_buf, out_size, method);
+        }
 
-		*out_size = strm.total_out;
-		lzmaEnd (&strm);
+        *out_size = strm.total_out;
+        lzmaEnd (&strm);
 
-		/* If compression didn't reduce size, fall back to STORE */
-		if (*out_size >= in_size) {
-			free (*out_buf);
-			*method = MZIP_METHOD_STORE;
-			return mzip_compress_data (in_buf, in_size, out_buf, out_size, method);
-		}
-		return 0;
+        /* If compression didn't reduce size, fall back to STORE */
+        if (*out_size >= in_size) {
+            free (*out_buf);
+            *method = MZIP_METHOD_STORE;
+            return mzip_compress_data (in_buf, in_size, out_buf, out_size, method);
+        }
+        return 0;
 	}
 #endif
 #ifdef MZIP_ENABLE_BROTLI

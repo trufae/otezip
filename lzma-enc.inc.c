@@ -121,6 +121,8 @@ static int simple_lzma_compress(const uint8_t *src, size_t src_size,
         return 0;  /* Invalid input or not enough output capacity */
     }
 
+    (void)props;
+
     /* For this minimal implementation, we'll do very simple RLE compression */
     size_t dst_pos = 0;
     size_t src_pos = 0;
@@ -200,8 +202,10 @@ int lzmaInit(z_stream *strm, int level) {
         return Z_MEM_ERROR;
     }
     
-    /* Allocate compression buffer */
-    ctx->compress_buffer_size = 2 * ctx->window_size;  /* Conservative overestimate */
+    /* Allocate compression buffer. For our simple RLE/literal scheme the
+     * worst-case expansion can be several times the input chunk size, so
+     * allocate a larger working buffer to avoid early failures on random data. */
+    ctx->compress_buffer_size = 4 * ctx->window_size;  /* Larger conservative overestimate */
     ctx->compress_buffer = (uint8_t *)malloc(ctx->compress_buffer_size);
     if (!ctx->compress_buffer) {
         free(ctx->window_buffer);
@@ -250,43 +254,52 @@ int lzmaCompress(z_stream *strm, int flush) {
         ctx->is_last_block = 1;
     }
     
-    /* Compress data */
+    /* Compress data.  Process in chunks so very large inputs don't require
+     * an oversized temporary buffer. The header (which encodes the full
+     * uncompressed size) is written above using the initial avail_in value.
+     */
     if (strm->avail_in > 0) {
-        /* Determine how much we can compress */
-        size_t input_size = strm->avail_in;
-        size_t max_output = strm->avail_out;
-        
-        /* Make sure we have enough output space */
-        if (max_output < input_size + 16 + LZMA_HEADER_SIZE) {  /* Ensure ample space */
-            return Z_BUF_ERROR;
+        size_t remaining = strm->avail_in;
+        /* Debug: print initial sizes when running under TESTING env */
+        (void)0;
+        /* Work on windows of at most ctx->window_size bytes */
+        while (remaining > 0) {
+            size_t input_size = remaining;
+            if (input_size > ctx->window_size) input_size = ctx->window_size;
+
+            /* Estimate minimal required output for this chunk (conservative)
+             * literals + some overhead. We don't re-add header here because
+             * it was already written on the first call. */
+            size_t need_out = input_size + 32;
+            if (strm->avail_out < need_out) {
+                return Z_BUF_ERROR;
+            }
+
+            int compressed_size = simple_lzma_compress(strm->next_in, input_size,
+                                                      ctx->compress_buffer,
+                                                      ctx->compress_buffer_size,
+                                                      ctx->properties);
+            (void)0;
+            if (compressed_size <= 0) {
+                return Z_DATA_ERROR;
+            }
+
+            if ((size_t)compressed_size > strm->avail_out) {
+                return Z_BUF_ERROR;
+            }
+
+            memcpy(strm->next_out, ctx->compress_buffer, compressed_size);
+            strm->next_out += compressed_size;
+            strm->avail_out -= compressed_size;
+            strm->total_out += compressed_size;
+
+            /* Update input pointers/counters */
+            strm->next_in += input_size;
+            strm->avail_in -= input_size;
+            strm->total_in += input_size;
+
+            remaining -= input_size;
         }
-        
-        /* Compress using our simple algorithm */
-        int compressed_size = simple_lzma_compress(strm->next_in, input_size, 
-                                                  ctx->compress_buffer, 
-                                                  ctx->compress_buffer_size,
-                                                  ctx->properties);
-        
-        /* Check if compression succeeded */
-        if (compressed_size <= 0) {
-            return Z_DATA_ERROR;
-        }
-        
-        /* Check output space */
-        if (compressed_size > strm->avail_out) {
-            return Z_BUF_ERROR;
-        }
-        
-        /* Copy compressed data to output */
-        memcpy(strm->next_out, ctx->compress_buffer, compressed_size);
-        strm->next_out += compressed_size;
-        strm->avail_out -= compressed_size;
-        strm->total_out += compressed_size;
-        
-        /* Update input counters */
-        strm->next_in += input_size;
-        strm->avail_in -= input_size;
-        strm->total_in += input_size;
     }
     
     return (ctx->is_last_block && strm->avail_in == 0) ? Z_STREAM_END : Z_OK;
