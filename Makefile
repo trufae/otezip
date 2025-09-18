@@ -8,6 +8,8 @@ all: mzip
 
 mzip: main.c mzip.c mzip.h config.h
 	meson build && ninja -C build
+	# Ensure a convenient top-level binary exists for quick invocation
+	cp -f build/mzip ./mzip
 
 install:
 	mkdir -p $(DESTDIR)$(BINDIR)
