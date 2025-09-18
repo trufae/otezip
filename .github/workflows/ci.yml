@@ -20,7 +20,9 @@ jobs:
         run: make
 
       - name: Run tests
-        run: make -C test
+        run: make test
+      - name: Run asan tests
+        run: make test2
 
   build-macos:
     runs-on: macos-latest

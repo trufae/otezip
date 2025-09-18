@@ -19,9 +19,18 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/mzip
 
 test:
+	meson build-test && ninja -C build-test
+	cp -f build-test/mzip ./mzip
 	$(MAKE) -C test
+	rm -rf build-test
+
+test2:
+	meson build-test -Db_sanitize=address && ninja -C build-test
+	cp -f build-test/mzip ./mzip
+	CFLAGS="-fsanitize=address $(CFLAGS)" $(MAKE) -C test
+	rm -rf build-test
 
 clean:
 	rm -rf build
 
-.PHONY: all clean install uninstall test
+.PHONY: all clean install uninstall test test2
