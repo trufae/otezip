@@ -13,15 +13,25 @@
 #include "config.h"
 #include "mzip.h"
 
+#include <limits.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <errno.h>
+#include <unistd.h>
+
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+
 static void usage(void) {
-	puts("mzip – minimal ZIP reader/writer (mzip.h demo)\n"
-			"Usage: mzip [-l | -x | -c | -a | -v] <archive.zip> [files...] [options]\n"
-			"  -l   List contents\n"
-			"  -x   Extract all files into current directory\n"
-			"  -c   Create new archive with specified files\n"
-			"  -a   Add files to existing archive\n"
-			"  -v   Show version number\n\n"
-			"Options:");
+    puts("mzip – minimal ZIP reader/writer (mzip.h demo)\n"
+            "Usage: mzip [-l | -x | -c | -a | -v] <archive.zip> [files...] [options]\n"
+            "  -l   List contents\n"
+            "  -x   Extract all files into current directory\n"
+            "  -c   Create new archive with specified files\n"
+            "  -a   Add files to existing archive\n"
+            "  -v   Show version number\n\n"
+            "Options:");
 
 	/* Show compression options based on what's enabled in config */
 #ifdef MZIP_ENABLE_STORE
@@ -43,8 +53,12 @@ static void usage(void) {
 	puts("  -z5  Use Brotli compression");
 #endif
 #ifdef MZIP_ENABLE_LZFSE
-	puts("  -z6  Use LZFSE compression");
+    puts("  -z6  Use LZFSE compression");
 #endif
+    puts("  -P<policy>, --policy=<policy>  Extraction policy for suspicious entries\n"
+         "      reject (default)  - reject entries with absolute paths, empty names, '..' that escape, or symlink parents\n"
+         "      strip             - remove leading '..' components that would escape (e.g., '../../a' -> 'a')\n"
+         "      allow             - allow unsafe extraction (use with caution)\n");
 }
 
 static int list_files(const char *path) {
@@ -156,41 +170,167 @@ static int create_or_add_files(const char *path, char **files, int num_files, in
 	return 0;
 }
 
+/* Normalize a zip entry name into 'out'. Return 0 on success, -1 on invalid path. */
+/* Extraction policies */
+#define POLICY_REJECT 0       /* default: reject suspicious entries */
+#define POLICY_STRIP  1       /* strip leading '..' components */
+#define POLICY_ALLOW  2       /* allow unsafe extraction (use with caution) */
+
+static int g_extract_policy = POLICY_REJECT;
+
+static int sanitize_extract_path(const char *name, char *out, size_t outlen) {
+    if (!name || !*name) return -1;
+    size_t nlen = strlen(name);
+    if (nlen >= (size_t)PATH_MAX) return -1;
+
+    char tmp[PATH_MAX];
+    /* Normalize backslashes to forward slashes */
+    for (size_t i = 0; i <= nlen; ++i) tmp[i] = (name[i] == '\\') ? '/' : name[i];
+
+    /* Reject absolute paths */
+    if (tmp[0] == '/' || tmp[0] == '\\') return -1;
+    /* Reject Windows drive absolute like C:/ or C:\ */
+    if (nlen >= 2 && ((tmp[1] == ':' && ((tmp[0] >= 'A' && tmp[0] <= 'Z') || (tmp[0] >= 'a' && tmp[0] <= 'z'))))) return -1;
+
+    /* Tokenize and resolve '.' and '..' without touching the filesystem */
+    char *segments[PATH_MAX / 2];
+    int segc = 0;
+    char *saveptr = NULL;
+    char *tok = strtok_r(tmp, "/", &saveptr);
+    while (tok) {
+        if (strcmp(tok, "") == 0 || strcmp(tok, ".") == 0) {
+            /* skip */
+        } else if (strcmp(tok, "..") == 0) {
+            if (segc == 0) {
+                if (g_extract_policy == POLICY_REJECT) {
+                    /* would escape extraction root */
+                    return -1;
+                } else if (g_extract_policy == POLICY_STRIP) {
+                    /* drop this leading .. component */
+                    /* just continue without pushing */
+                } else {
+                    /* POLICY_ALLOW: allow moving up but do not actually escape since
+                     * we are not resolving against filesystem; treat as no-op */
+                }
+            } else {
+                segc--;
+            }
+        } else {
+            segments[segc++] = tok;
+        }
+        tok = strtok_r(NULL, "/", &saveptr);
+    }
+
+    if (segc == 0) return -1; /* empty or only dots */
+
+    /* Build normalized path */
+    size_t pos = 0;
+    for (int i = 0; i < segc; ++i) {
+        size_t need = strlen(segments[i]);
+        if (i) {
+            if (pos + 1 >= outlen) return -1;
+            out[pos++] = '/';
+        }
+        if (pos + need >= outlen) return -1;
+        memcpy(out + pos, segments[i], need);
+        pos += need;
+    }
+    out[pos] = '\0';
+    return 0;
+}
+
+/* Ensure parent directories exist and are not symlinks. Return 0 on success. */
+static int ensure_parent_dirs(const char *path) {
+    char tmp[PATH_MAX];
+    strncpy(tmp, path, sizeof(tmp));
+    tmp[sizeof(tmp)-1] = '\0';
+
+    size_t len = strlen(tmp);
+    for (size_t i = 0; i < len; ++i) {
+        if (tmp[i] == '/') {
+            tmp[i] = '\0';
+            struct stat st;
+            if (lstat(tmp, &st) == 0) {
+                if (S_ISLNK(st.st_mode)) {
+                    if (g_extract_policy == POLICY_REJECT) return -1;
+                    /* if policy allows, treat symlink as opaque and continue */
+                }
+                if (!S_ISDIR(st.st_mode) && !S_ISLNK(st.st_mode)) return -1;
+            } else {
+                if (errno == ENOENT) {
+                    if (mkdir(tmp, 0755) != 0) return -1;
+                } else {
+                    return -1;
+                }
+            }
+            tmp[i] = '/';
+        }
+    }
+    return 0;
+}
+
 static int extract_all(const char *path) {
-	int err=0;
-	zip_t *za = zip_open(path, ZIP_RDONLY, &err);
-	if (!za) {
-		fprintf(stderr, "Failed to open %s (err=%d)\n", path, err);
-		return 1;
-	}
+    int err = 0;
+    zip_t *za = zip_open(path, ZIP_RDONLY, &err);
+    if (!za) {
+        fprintf(stderr, "Failed to open %s (err=%d)\n", path, err);
+        return 1;
+    }
 
-	zip_uint64_t n = zip_get_num_files(za);
-	for (zip_uint64_t i = 0; i < n; ++i) {
-		zip_file_t *zf = zip_fopen_index(za, i, 0);
-		if (!zf) {
-			fprintf(stderr, "Could not read entry %llu\n", (unsigned long long)i);
-			continue;
-		}
+    zip_uint64_t n = zip_get_num_files(za);
+    for (zip_uint64_t i = 0; i < n; ++i) {
+        zip_file_t *zf = zip_fopen_index(za, i, 0);
+        if (!zf) {
+            fprintf(stderr, "Could not read entry %llu\n", (unsigned long long)i);
+            continue;
+        }
 
-		const char *fname = ((struct mzip_entry*)za->entries)[i].name; /* internal */
-		FILE *out = fopen(fname, "wb");
-		if (!out) {
-			fprintf(stderr, "Cannot create %s\n", fname);
-			zip_fclose(zf);
-			continue;
-		}
+        const char *raw_name = ((struct mzip_entry*)za->entries)[i].name; /* internal */
+        char fname_sanitized[PATH_MAX];
+        if (sanitize_extract_path(raw_name, fname_sanitized, sizeof(fname_sanitized)) != 0) {
+            fprintf(stderr, "Skipping suspicious entry: %s\n", raw_name ? raw_name : "(null)");
+            zip_fclose(zf);
+            continue;
+        }
 
-		/* Write data and add proper termination for text files */
+        /* If entry denotes a directory (name ends with '/'), create it */
+        size_t rlen = raw_name ? strlen(raw_name) : 0;
+        if (rlen > 0 && raw_name[rlen-1] == '/') {
+            if (ensure_parent_dirs(fname_sanitized) != 0) {
+                fprintf(stderr, "Failed to create directory for %s\n", fname_sanitized);
+            } else {
+                if (mkdir(fname_sanitized, 0755) != 0 && errno != EEXIST) {
+                    fprintf(stderr, "Failed to create directory %s\n", fname_sanitized);
+                }
+            }
+            zip_fclose(zf);
+            continue;
+        }
+
+        if (ensure_parent_dirs(fname_sanitized) != 0) {
+            fprintf(stderr, "Cannot ensure parent dirs for %s\n", fname_sanitized);
+            zip_fclose(zf);
+            continue;
+        }
+
+        FILE *out = fopen(fname_sanitized, "wb");
+        if (!out) {
+            fprintf(stderr, "Cannot create %s\n", fname_sanitized);
+            zip_fclose(zf);
+            continue;
+        }
+
+        /* Write data and add proper termination for text files */
         fwrite(zf->data, 1, zf->size, out);
         fclose(out);
         /* Save size before closing – zip_fclose() frees the zip_file_t */
         size_t entry_size = (size_t)zf->size;
         zip_fclose(zf);
-        printf("Extracted %s (%zu bytes)\n", fname, entry_size);
-	}
+        printf("Extracted %s (%zu bytes)\n", fname_sanitized, entry_size);
+    }
 
-	zip_close(za);
-	return 0;
+    zip_close(za);
+    return 0;
 }
 
 int main(int argc, char **argv) {
@@ -294,6 +434,31 @@ int main(int argc, char **argv) {
 			compression_method = MZIP_METHOD_LZFSE; /* LZFSE */
 		}
 #endif
+	}
+
+	/* Parse extraction policy option: -P<policy> or --policy=<policy>
+	 * Supported: reject (default), strip, allow
+	 */
+	for (i = 3; i < argc; i++) {
+		const char *arg = argv[i];
+		const char *val = NULL;
+		if (strncmp(arg, "-P", 2) == 0) {
+			val = arg + 2;
+			if (*val == '\0' && i + 1 < argc) val = argv[++i];
+		} else if (strncmp(arg, "--policy=", 9) == 0) {
+			val = arg + 9;
+		}
+		if (!val) continue;
+		if (strcmp(val, "reject") == 0 || strcmp(val, "0") == 0) {
+			g_extract_policy = POLICY_REJECT;
+		} else if (strcmp(val, "strip") == 0 || strcmp(val, "1") == 0) {
+			g_extract_policy = POLICY_STRIP;
+		} else if (strcmp(val, "allow") == 0 || strcmp(val, "2") == 0) {
+			g_extract_policy = POLICY_ALLOW;
+		} else {
+			fprintf(stderr, "Unknown policy: %s\n", val);
+			return 1;
+		}
 	}
 
 	if (mode_list) {
