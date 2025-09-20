@@ -92,6 +92,7 @@ static void usage(void) {
          "      strip             - remove leading '..' components that would escape (e.g., '../../a' -> 'a')\n"
          "      allow             - allow unsafe extraction (use with caution)\n");
     puts("  --verify-crc    Verify CRC32 when extracting and fail on mismatch\n");
+    puts("  --ignore-zipbomb  Ignore zipbomb expansion checks and allow large claimed uncompressed sizes (dangerous)\n");
 }
 
 static int list_files(const char *path) {
@@ -627,6 +628,15 @@ int main(int argc, char **argv) {
         if (strcmp(argv[i], "--verify-crc") == 0) {
             /* enable strict CRC verification in the mzip backend */
             mzip_verify_crc = 1;
+        }
+    }
+
+    /* Parse zipbomb ignore option: --ignore-zipbomb (explicit override) */
+    for (i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--ignore-zipbomb") == 0) {
+            /* explicit, dangerous override: allow archives that claim huge
+             * uncompressed sizes. This bypasses internal safety checks. */
+            mzip_ignore_zipbomb = 1;
         }
     }
 

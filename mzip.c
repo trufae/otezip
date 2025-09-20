@@ -74,6 +74,15 @@ static int mzip_finalize_archive(zip_t *za);
 /* Global flag: when non-zero, verify CRC32 on extraction and fail on mismatch. */
 int mzip_verify_crc = 0;
 
+/* Defaults for expansion protection: allow up to 1000x expansion plus 1 MiB slack.
+ * These are conservative defaults to prevent OOM from malicious archives while
+ * allowing reasonable compression ratios for typical files. The CLI utility
+ * can set `mzip_ignore_zipbomb` to bypass these checks when the user explicitly
+ * requests so (see main.c flag). */
+uint64_t mzip_max_expansion_ratio = 1000ULL;
+uint64_t mzip_max_expansion_slack = 1024ULL * 1024ULL; /* 1 MiB */
+int mzip_ignore_zipbomb = 0;
+
 /* helper: little-endian readers/writers (ZIP format is little-endian) */
 
 /* Date/time conversion for ZIP entries */
@@ -399,6 +408,23 @@ static int mzip_extract_entry(zip_t *za, struct mzip_entry *e, uint8_t **out_buf
     if (data_ofs > file_sz) return -1;
     if ((uint64_t)e->comp_size > MZIP_MAX_PAYLOAD || (uint64_t)e->uncomp_size > MZIP_MAX_PAYLOAD) return -1;
     if (data_ofs + (uint64_t)e->comp_size > file_sz) return -1;
+
+    /* Protect against zipbombs: require that expected uncompressed size from
+     * the central directory is within a reasonable bound relative to the
+     * compressed size. If the entry claims a huge expansion, fail unless the
+     * global `mzip_ignore_zipbomb` flag is set by the caller (CLI override).
+     * We compute allowed = comp_size * ratio + slack and compare against the
+     * declared uncompressed size. Use 64-bit math to avoid overflow. */
+    if (!mzip_ignore_zipbomb && e->comp_size > 0) {
+        uint64_t allowed = (uint64_t)e->comp_size * mzip_max_expansion_ratio;
+        allowed += mzip_max_expansion_slack;
+        if ((uint64_t)e->uncomp_size > allowed) {
+            /* suspiciously large uncompressed size */
+            fprintf(stderr, "mzip: entry '%s' claims huge uncompressed size (%u), rejecting to avoid zipbomb\n",
+                    e->name ? e->name : "<unknown>", e->uncomp_size);
+            return -1;
+        }
+    }
 
     /* seek to compressed data (we were at local header +30 already) */
     if (fseek (za->fp, (long)data_ofs, SEEK_SET) != 0) {

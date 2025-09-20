@@ -150,6 +150,15 @@ int            zip_set_file_compression(zip_t *za, zip_uint64_t index, zip_int32
 /* Global flag: when non-zero, verify CRC32 on extraction and fail on mismatch. */
 extern int mzip_verify_crc;
 
+/* Zipbomb / expansion protection globals.
+ * - mzip_max_expansion_ratio: maximum allowed multiplier (out <= in * ratio + slack)
+ * - mzip_max_expansion_slack: additional bytes allowed regardless of ratio
+ * - mzip_ignore_zipbomb: when non-zero, skip the expansion checks (CLI override)
+ */
+extern uint64_t mzip_max_expansion_ratio;
+extern uint64_t mzip_max_expansion_slack;
+extern int mzip_ignore_zipbomb;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
