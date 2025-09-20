@@ -259,6 +259,17 @@ static int mzip_load_central(zip_t *za) {
 		}
 		const uint8_t *h = cd_buf + off;
 
+		/* Reject entries that rely on data descriptors (general purpose
+		 * bit 3). This project explicitly does not support data descriptors
+		 * (see README). If we encounter them, fail early with a clear
+		 * error instead of continuing in an inconsistent state. */
+		uint16_t gp_flag = mzip_rd16 (h + 8);
+		if (gp_flag & 0x0008) {
+			fprintf(stderr, "mzip: data descriptors (general purpose flag bit 3) not supported\n");
+			free (cd_buf);
+			return -1;
+		}
+
 		uint16_t filename_len = mzip_rd16 (h + 28);
 		uint16_t extra_len    = mzip_rd16 (h + 30);
 		uint16_t comment_len  = mzip_rd16 (h + 32);
@@ -298,6 +309,16 @@ static int mzip_extract_entry(zip_t *za, struct mzip_entry *e, uint8_t **out_buf
         return -1;
     }
 	if (mzip_rd32 (lfh) != MZIP_SIG_LFH) {
+		return -1;
+	}
+
+	/* Check general purpose flag in local header: reject data descriptors
+	 * (bit 3). The library does not support deferred CRC/size via
+	 * data descriptors. Fail with a descriptive error to avoid entering
+	 * an inconsistent state. */
+	uint16_t lfh_gp = mzip_rd16 (lfh + 6);
+	if (lfh_gp & 0x0008) {
+		fprintf(stderr, "mzip: data descriptors (general purpose flag bit 3) not supported\n");
 		return -1;
 	}
 	uint16_t fn_len = mzip_rd16 (lfh + 26);
