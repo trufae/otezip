@@ -3,8 +3,6 @@ name: CI
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
 
 jobs:
   build-linux:
@@ -19,8 +17,14 @@ jobs:
       - name: Build
         run: make
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-linux
+          path: otezip
+
       - name: Run tests
         run: make test
+
       - name: Run asan tests
         run: make test2
 
@@ -38,6 +42,32 @@ jobs:
 
       - name: Run tests
         run: make -C test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-macos
+          path: otezip
+
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install meson ninja
+
+      - name: Build
+        run: |
+          meson setup build --backend=ninja
+          ninja -C build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-windows
+          path: build/otezip.exe
 
   test-make:
     runs-on: ${{ matrix.os }}
@@ -80,54 +110,53 @@ jobs:
           dir otezip.exe
           .\otezip.exe --help
 
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            name: linux
-            ext: ""
-          - os: macos-latest
-            name: macos
-            ext: ""
-          - os: windows-latest
-            name: windows
-            ext: .exe
-
+  check_release:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    outputs:
+      is_release: ${{ steps.release.outputs.is }}
+      tag_name: ${{ steps.release.outputs.tag }}
+    needs:
+      - build-linux
+      - build-macos
+      - build-windows
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-
-      - name: Install dependencies (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y meson ninja-build
-
-      - name: Install dependencies (macOS)
-        if: matrix.os == 'macos-latest'
-        run: brew install meson ninja
-
-      - name: Install dependencies (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          python -m pip install --upgrade pip
-          pip install meson ninja
-
-      - name: Build (Linux/macOS)
-        if: matrix.os != 'windows-latest'
-        run: make
-
-      - name: Build (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          meson setup build --backend=vs
-          ninja -C build
-
-      - name: Upload Release Asset
-        uses: softprops/action-gh-release@v1
+      - name: Checkout code
+        uses: actions/checkout@v3
         with:
-          files: otezip${{ matrix.ext }}
-          name: otezip-${{ matrix.name }}${{ matrix.ext }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0 # Download all git history and tags
+
+      - name: Check if is a release
+        run: git describe --exact-match --tags ${{ github.sha }} | awk 'BEGIN{tag="-";r="no"}/^[0-9]+\.[0-9]+/{tag=$0;r="yes"};END{print "::set-output name=is::"r;print "::set-output name=tag::"tag}'
+        id: release
+
+  release:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.check_release.outputs.is_release == 'yes' }}
+    needs:
+      - check_release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # Download all git history and tags
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/artifacts
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2.3.2
+        with:
+          name: ${{ needs.check_release.outputs.tag_name }}
+          tag_name: ${{ needs.check_release.outputs.tag_name }}
+          body: |
+            Release ${{ needs.check_release.outputs.tag_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/artifacts/build-linux/otezip
+            dist/artifacts/build-macos/otezip
+            dist/artifacts/build-windows/otezip.exe
