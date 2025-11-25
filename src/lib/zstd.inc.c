@@ -377,15 +377,25 @@ int zstdCompress(z_stream *strm, int flush) {
 
 		/* Update input */
 		if (block_size > 0) {
+			/* Save source pointer before advancing */
+			const uint8_t *src = strm->next_in;
+			
 			strm->next_in += block_size;
 			strm->avail_in -= block_size;
 			strm->total_in += block_size;
 
-			/* Update window buffer for future references */
-			memcpy (ctx->window_buffer + ctx->window_pos,
-				strm->next_in - block_size,
-				block_size);
-			ctx->window_pos = (ctx->window_pos + block_size) % ctx->window_size;
+			/* Update window buffer for future references, handling wrap-around */
+			size_t space_left = ctx->window_size - ctx->window_pos;
+			if (block_size <= space_left) {
+				/* Data fits without wrapping */
+				memcpy (ctx->window_buffer + ctx->window_pos, src, block_size);
+				ctx->window_pos += block_size;
+			} else {
+				/* Data wraps around the circular buffer */
+				memcpy (ctx->window_buffer + ctx->window_pos, src, space_left);
+				memcpy (ctx->window_buffer, src + space_left, block_size - space_left);
+				ctx->window_pos = block_size - space_left;
+			}
 		}
 
 		/* If this was the last block, we're done */
@@ -527,11 +537,19 @@ int zstdDecompress(z_stream *strm, int flush) {
 			strm->total_out += copy_size;
 			ctx->current_block_remaining -= copy_size;
 
-			/* Copy to window buffer */
-			memcpy (ctx->window_buffer + ctx->window_pos,
-				strm->next_out - copy_size,
-				copy_size);
-			ctx->window_pos = (ctx->window_pos + copy_size) % ctx->window_size;
+			/* Copy to window buffer, handling wrap-around */
+			const uint8_t *data = strm->next_out - copy_size;
+			size_t space_left = ctx->window_size - ctx->window_pos;
+			if (copy_size <= space_left) {
+				/* Data fits without wrapping */
+				memcpy (ctx->window_buffer + ctx->window_pos, data, copy_size);
+				ctx->window_pos += copy_size;
+			} else {
+				/* Data wraps around the circular buffer */
+				memcpy (ctx->window_buffer + ctx->window_pos, data, space_left);
+				memcpy (ctx->window_buffer, data + space_left, copy_size - space_left);
+				ctx->window_pos = copy_size - space_left;
+			}
 
 			/* Check if we're out of output space */
 			if (strm->avail_out == 0) {
@@ -573,11 +591,24 @@ int zstdDecompress(z_stream *strm, int flush) {
 					strm->avail_out -= block_size;
 					strm->total_out += block_size;
 
-					/* Copy to window buffer */
-					memcpy (ctx->window_buffer + ctx->window_pos,
-						strm->next_in,
-						block_size);
-					ctx->window_pos = (ctx->window_pos + block_size) % ctx->window_size;
+					/* Copy to window buffer, handling wrap-around */
+					size_t space_left = ctx->window_size - ctx->window_pos;
+					if (block_size <= space_left) {
+						/* Data fits without wrapping */
+						memcpy (ctx->window_buffer + ctx->window_pos,
+							strm->next_in,
+							block_size);
+						ctx->window_pos += block_size;
+					} else {
+						/* Data wraps around the circular buffer */
+						memcpy (ctx->window_buffer + ctx->window_pos,
+							strm->next_in,
+							space_left);
+						memcpy (ctx->window_buffer,
+							strm->next_in + space_left,
+							block_size - space_left);
+						ctx->window_pos = block_size - space_left;
+					}
 
 					/* Advance input */
 					strm->next_in += block_size;
@@ -634,11 +665,24 @@ int zstdDecompress(z_stream *strm, int flush) {
 					strm->avail_out -= decompressed_size;
 					strm->total_out += decompressed_size;
 
-					/* Copy to window buffer */
-					memcpy (ctx->window_buffer + ctx->window_pos,
-						ctx->decompress_buffer,
-						decompressed_size);
-					ctx->window_pos = (ctx->window_pos + decompressed_size) % ctx->window_size;
+					/* Copy to window buffer, handling wrap-around */
+					size_t space_left = ctx->window_size - ctx->window_pos;
+					if ((size_t)decompressed_size <= space_left) {
+						/* Data fits without wrapping */
+						memcpy (ctx->window_buffer + ctx->window_pos,
+							ctx->decompress_buffer,
+							decompressed_size);
+						ctx->window_pos += decompressed_size;
+					} else {
+						/* Data wraps around the circular buffer */
+						memcpy (ctx->window_buffer + ctx->window_pos,
+							ctx->decompress_buffer,
+							space_left);
+						memcpy (ctx->window_buffer,
+							ctx->decompress_buffer + space_left,
+							decompressed_size - space_left);
+						ctx->window_pos = decompressed_size - space_left;
+					}
 				} else {
 					/* Store for partial output */
 					ctx->current_block_size = decompressed_size;

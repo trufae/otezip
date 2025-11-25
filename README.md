@@ -1,4 +1,4 @@
-# Minimalistic ZIP Implementation (otezip)
+# OpTimizEd ZIP libzip compatible (otezip)
 
 [![CI](https://github.com/trufae/otezip/actions/workflows/ci.yml/badge.svg)](https://github.com/trufae/otezip/actions/workflows/ci.yml)
 
