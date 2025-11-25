@@ -74,45 +74,47 @@ static int otezip_finalize_archive(zip_t *za);
 /* Helper function to get compression method ID from string name.
  * Returns the OTEZIP_METHOD_* value or -1 if invalid/not supported. */
 int otezip_method_from_string(const char *method_name) {
-    if (!method_name) return -1;
+	if (!method_name) {
+		return -1;
+	}
 
-    struct method_map {
-        const char *name;
-        int method;
-    };
+	struct method_map {
+		const char *name;
+		int method;
+	};
 
-    static const struct method_map methods[] = {
+	static const struct method_map methods[] = {
 #ifdef OTEZIP_ENABLE_STORE
-        {"store", OTEZIP_METHOD_STORE},
+		{ "store", OTEZIP_METHOD_STORE },
 #endif
 #ifdef OTEZIP_ENABLE_DEFLATE
-        {"deflate", OTEZIP_METHOD_DEFLATE},
+		{ "deflate", OTEZIP_METHOD_DEFLATE },
 #endif
 #ifdef OTEZIP_ENABLE_ZSTD
-        {"zstd", OTEZIP_METHOD_ZSTD},
+		{ "zstd", OTEZIP_METHOD_ZSTD },
 #endif
 #ifdef OTEZIP_ENABLE_LZMA
-        {"lzma", OTEZIP_METHOD_LZMA},
+		{ "lzma", OTEZIP_METHOD_LZMA },
 #endif
 #ifdef OTEZIP_ENABLE_LZ4
-        {"lz4", OTEZIP_METHOD_LZ4},
+		{ "lz4", OTEZIP_METHOD_LZ4 },
 #endif
 #ifdef OTEZIP_ENABLE_BROTLI
-        {"brotli", OTEZIP_METHOD_BROTLI},
+		{ "brotli", OTEZIP_METHOD_BROTLI },
 #endif
 #ifdef OTEZIP_ENABLE_LZFSE
-        {"lzfse", OTEZIP_METHOD_LZFSE},
+		{ "lzfse", OTEZIP_METHOD_LZFSE },
 #endif
-        {NULL, -1} /* sentinel */
-    };
+		{ NULL, -1 } /* sentinel */
+	};
 
-    for (size_t i = 0; methods[i].name != NULL; ++i) {
-        if (strcmp(method_name, methods[i].name) == 0) {
-            return methods[i].method;
-        }
-    }
+	for (size_t i = 0; methods[i].name != NULL; ++i) {
+		if (strcmp (method_name, methods[i].name) == 0) {
+			return methods[i].method;
+		}
+	}
 
-    return -1;
+	return -1;
 }
 
 /* Global flag: when non-zero, verify CRC32 on extraction and fail on mismatch. */
@@ -760,6 +762,55 @@ static int otezip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_b
 	}
 #endif
 
+#ifdef OTEZIP_ENABLE_ZSTD
+	if (*method == OTEZIP_METHOD_ZSTD) {
+		/* ZSTD compression */
+		/* For raw blocks (no actual compression), we need space for:
+		 * input data + frame header (5) + block headers (~3 bytes per ~65KB block) */
+		size_t out_cap = in_size + 1024; /* 1KB overhead for frame + block headers */
+		*out_buf = (uint8_t *)malloc (out_cap);
+		if (!*out_buf) {
+			return -1;
+		}
+		z_stream strm = { 0 };
+		if (zstdInit (&strm, Z_DEFAULT_COMPRESSION) != Z_OK) {
+			free (*out_buf);
+			*out_buf = NULL;
+			return -1;
+		}
+
+		strm.next_in = in_buf;
+		strm.avail_in = (uInt)in_size;
+		strm.next_out = *out_buf;
+		strm.avail_out = (uInt)out_cap;
+
+		/* Keep calling compress until all data is processed and we get Z_STREAM_END */
+		int ret = Z_OK;
+		while (ret == Z_OK) {
+			ret = zstdCompress (&strm, Z_FINISH);
+		}
+		if (ret != Z_STREAM_END) {
+			/* If compression failed, fall back to STORE */
+			zstdEnd (&strm);
+			free (*out_buf);
+			*out_buf = NULL;
+			*method = OTEZIP_METHOD_STORE;
+			return otezip_compress_data (in_buf, in_size, out_buf, out_size, method);
+		}
+
+		*out_size = (uint32_t)strm.total_out;
+		zstdEnd (&strm);
+
+		/* If compression didn't reduce size, fall back to STORE */
+		if (*out_size >= in_size) {
+			free (*out_buf);
+			*method = OTEZIP_METHOD_STORE;
+			return otezip_compress_data (in_buf, in_size, out_buf, out_size, method);
+		}
+		return 0;
+	}
+#endif
+
 #ifdef OTEZIP_ENABLE_LZ4
 	if (*method == OTEZIP_METHOD_LZ4) {
 		/* LZ4 compression using radare2's implementation */
@@ -784,6 +835,49 @@ static int otezip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_b
 		return 0;
 	}
 #endif
+#ifdef OTEZIP_ENABLE_LZFSE
+	if (*method == OTEZIP_METHOD_LZFSE) {
+		/* LZFSE compression */
+		size_t out_cap = in_size + (in_size / 10) + 100; /* Worst case: ~110% + margin */
+		*out_buf = (uint8_t *)malloc (out_cap);
+		if (!*out_buf) {
+			return -1;
+		}
+		z_stream strm = { 0 };
+		if (lzfseInit (&strm, Z_DEFAULT_COMPRESSION) != Z_OK) {
+			free (*out_buf);
+			*out_buf = NULL;
+			return -1;
+		}
+
+		strm.next_in = in_buf;
+		strm.avail_in = (uInt)in_size;
+		strm.next_out = *out_buf;
+		strm.avail_out = (uInt)out_cap;
+
+		int ret = lzfseCompress (&strm, Z_FINISH);
+		if (ret != Z_STREAM_END) {
+			/* If compression failed, fall back to STORE */
+			lzfseEnd (&strm);
+			free (*out_buf);
+			*out_buf = NULL;
+			*method = OTEZIP_METHOD_STORE;
+			return otezip_compress_data (in_buf, in_size, out_buf, out_size, method);
+		}
+
+		*out_size = (uint32_t)strm.total_out;
+		lzfseEnd (&strm);
+
+		/* If compression didn't reduce size, fall back to STORE */
+		if (*out_size >= in_size) {
+			free (*out_buf);
+			*method = OTEZIP_METHOD_STORE;
+			return otezip_compress_data (in_buf, in_size, out_buf, out_size, method);
+		}
+		return 0;
+	}
+#endif
+
 #ifdef OTEZIP_ENABLE_LZMA
 	if (*method == OTEZIP_METHOD_LZMA) {
 		/* LZMA compression */

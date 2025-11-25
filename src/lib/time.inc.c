@@ -22,7 +22,8 @@ static struct tm *otezip_localtime_r(const time_t *t, struct tm *out) {
 }
 
 static inline int dim(int value, int min, int max) {
-	return value < min? min: value > max? max : value;
+	return value < min? min: value > max? max
+					: value;
 }
 
 static void otezip_get_dostime(uint16_t *dos_time, uint16_t *dos_date) {

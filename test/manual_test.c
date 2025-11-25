@@ -6,7 +6,7 @@ int main() {
 	uint8_t hello[] = "hello
 			";
 		uint8_t *
-		compressed;
+			compressed;
 	uint32_t comp_size;
 	mzip_compress_data (hello, 6, &compressed, &comp_size, MZIP_METHOD_DEFLATE);
 	printf ("Original: %s", hello);

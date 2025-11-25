@@ -169,93 +169,42 @@ static uint32_t read_le32(const void *ptr) {
 		((uint32_t)p[3] << 24);
 }
 
-/* Simple RLE compression for Zstandard block */
+/* Simple compression for Zstandard block
+ * NOTE: For minimalistic implementation, we don't actually compress;
+ * returning 0 signals to use raw blocks instead. This avoids issues
+ * with RLE schemes that conflict with raw data patterns. */
 static int compress_block(const uint8_t *src, size_t src_size,
 	uint8_t *dst, size_t dst_capacity,
 	int level) {
+	(void)src; /* Unused in this minimal implementation */
+	(void)src_size; /* Unused */
+	(void)dst; /* Unused - we don't compress */
+	(void)dst_capacity; /* Unused */
 	(void)level; /* Unused in this minimal implementation */
-	/* This is a very simplified compression that only does basic RLE */
-	if (src_size == 0 || !src || !dst) {
-		return 0; /* Empty input or invalid pointers */
-	}
 
-	/* Check if there's enough space for output */
-	if (dst_capacity < src_size + 1) {
-		return 0; /* Not enough output capacity */
-	}
-
-	/* For this minimal implementation, we'll just do a simple RLE */
-	size_t dst_pos = 0;
-	size_t src_pos = 0;
-
-	while (src_pos < src_size) {
-		/* Check remaining output space */
-		if (dst_pos + 3 > dst_capacity) {
-			return 0; /* Not enough space */
-		}
-
-		/* Find run of identical bytes */
-		uint8_t run_byte = src[src_pos];
-		size_t run_length = 1;
-
-		while (src_pos + run_length < src_size &&
-			src[src_pos + run_length] == run_byte &&
-			run_length < 255) {
-			run_length++;
-		}
-
-		if (run_length >= 4) {
-			/* Encode run */
-			dst[dst_pos++] = 0; /* RLE marker */
-			dst[dst_pos++] = run_byte; /* Repeated byte */
-			dst[dst_pos++] = run_length; /* Length */
-			src_pos += run_length;
-		} else {
-			/* Literal */
-			dst[dst_pos++] = run_byte;
-			src_pos++;
-		}
-	}
-
-	return dst_pos; /* Return compressed size */
+	/* Return 0 to indicate: "use raw block instead" */
+	/* This avoids RLE scheme issues with literal 0 bytes conflicting with markers */
+	return 0;
 }
 
-/* Simple decompression for our Zstandard block */
+/* Simple decompression for our Zstandard block
+ * NOTE: Since we don't actually compress blocks (always using raw blocks),
+ * this function won't be called in normal operation. However, we keep it
+ * as a placeholder for potential future use. For now, just copy the data. */
 static int decompress_block(const uint8_t *src, size_t src_size,
 	uint8_t *dst, size_t dst_capacity) {
 	if (src_size == 0 || !src || !dst) {
 		return 0; /* Empty input or invalid pointers */
 	}
 
-	size_t dst_pos = 0;
-	size_t src_pos = 0;
-
-	while (src_pos < src_size) {
-		/* Check for RLE marker */
-		if (src[src_pos] == 0 && src_pos + 2 < src_size) {
-			uint8_t byte = src[src_pos + 1];
-			uint8_t length = src[src_pos + 2];
-			src_pos += 3;
-
-			/* Check output capacity */
-			if (dst_pos + length > dst_capacity) {
-				return 0; /* Output overflow */
-			}
-
-			/* Output run */
-			for (uint8_t i = 0; i < length; i++) {
-				dst[dst_pos++] = byte;
-			}
-		} else {
-			/* Literal byte */
-			if (dst_pos >= dst_capacity) {
-				return 0; /* Output overflow */
-			}
-			dst[dst_pos++] = src[src_pos++];
-		}
+	/* Check output capacity */
+	if (src_size > dst_capacity) {
+		return 0; /* Output overflow */
 	}
 
-	return dst_pos; /* Return decompressed size */
+	/* Just copy raw data - we're not actually compressing */
+	memcpy (dst, src, src_size);
+	return src_size; /* Return decompressed size */
 }
 
 /* --- Zstandard API Implementation --- */
@@ -280,7 +229,8 @@ int zstdInit(z_stream *strm, int level) {
 	/* Initialize context */
 	ctx->compression_level = level;
 	ctx->window_size = 1 << 17; /* 128KB window by default */
-	ctx->block_size = ZSTD_BLOCK_MAX_SIZE;
+	/* Block size is limited to 65535 by the 2-byte size field in block header */
+	ctx->block_size = 65535;
 	ctx->is_last_block = 0;
 
 	/* Allocate window buffer for LZ77 */
@@ -337,10 +287,10 @@ int zstdCompress(z_stream *strm, int flush) {
 	}
 
 	/* Simple block-based compression */
-	ctx->is_last_block = (flush == Z_FINISH);
+	/* Note: Don't set is_last_block yet - we'll set it when we run out of input */
 
 	/* Process input data */
-	while (strm->avail_in > 0 || ctx->is_last_block) {
+	while (strm->avail_in > 0) {
 		/* Determine block size */
 		uint32_t block_size = strm->avail_in < ctx->block_size? strm->avail_in: ctx->block_size;
 
@@ -357,10 +307,16 @@ int zstdCompress(z_stream *strm, int flush) {
 		/* If this is an empty final block, write a special block */
 		if (block_size == 0 && ctx->is_last_block) {
 			/* Write empty last block (type=0, size=0, last=1) */
-			strm->next_out[0] = 0x01; /* Last block bit set */
-			strm->next_out += 1;
-			strm->avail_out -= 1;
-			strm->total_out += 1;
+			/* Ensure space for 3-byte block header */
+			if (strm->avail_out < 3) {
+				return Z_BUF_ERROR;
+			}
+			strm->next_out[0] = 0x01; /* Last block bit set, raw block (type=0) */
+			strm->next_out[1] = 0x00; /* Size low byte = 0 */
+			strm->next_out[2] = 0x00; /* Size high byte = 0 */
+			strm->next_out += 3;
+			strm->avail_out -= 3;
+			strm->total_out += 3;
 
 			/* We're done */
 			return Z_STREAM_END;
@@ -436,6 +392,21 @@ int zstdCompress(z_stream *strm, int flush) {
 		if (ctx->is_last_block) {
 			return Z_STREAM_END;
 		}
+	}
+
+	/* After processing all input, write the final block if flush == Z_FINISH */
+	if (flush == Z_FINISH) {
+		/* Ensure space for 3-byte block header */
+		if (strm->avail_out < 3) {
+			return Z_BUF_ERROR;
+		}
+		strm->next_out[0] = 0x01; /* Last block bit set, raw block (type=0) */
+		strm->next_out[1] = 0x00; /* Size low byte = 0 */
+		strm->next_out[2] = 0x00; /* Size high byte = 0 */
+		strm->next_out += 3;
+		strm->avail_out -= 3;
+		strm->total_out += 3;
+		return Z_STREAM_END;
 	}
 
 	return Z_OK;
