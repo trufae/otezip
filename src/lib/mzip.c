@@ -210,12 +210,8 @@ static long mzip_find_eocd(FILE *fp, uint8_t *eocd_out /*22+*/, size_t *cd_size,
 	if (fseek (fp, file_size - (long)search_len, SEEK_SET) != 0) {
 		return -1;
 	}
-	uint8_t *buf = (uint8_t*)malloc (search_len);
-	if (!buf) {
-		return -1;
-	}
+	uint8_t buf[65558];
 	if (mzip_read_fully (fp, buf, search_len) != 0) {
-		free (buf);
 		return -1;
 	}
 	size_t i;
@@ -242,12 +238,10 @@ static long mzip_find_eocd(FILE *fp, uint8_t *eocd_out /*22+*/, size_t *cd_size,
             *total_entries = entries;
             *cd_size = cd_size_tmp;
             *cd_ofs = cd_ofs_tmp;
-            free (buf);
             return (long)(file_size - search_len + i);
         }
 	}
 	/* not found */
-	free (buf);
 	return -1;
 }
 
