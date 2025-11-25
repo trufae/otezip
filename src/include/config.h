@@ -62,4 +62,10 @@
 /* LZFSE is not officially in ZIP spec, using Apple-specific range */
 #define MZIP_METHOD_LZFSE  100  /* Apple-specific range */
 
+/*
+ * Compression buffer sizing constants
+ */
+#define MZIP_LZMA_HEADER_SIZE       13 /* LZMA header size */
+#define MZIP_LZMA_OVERHEAD_RATIO    8  /* 1/8 overhead for incompressible data */
+
 #endif /* MZIP_CONFIG_H */

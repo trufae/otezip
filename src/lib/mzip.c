@@ -810,9 +810,8 @@ static int mzip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_buf
 #ifdef MZIP_ENABLE_LZMA
 	if (*method == MZIP_METHOD_LZMA) {
 		/* LZMA compression */
-		/* Our minimal LZMA wrapper adds a 13-byte header and can expand data
-		 * in the worst case (literal-heavy). Use a conservative bound. */
-		size_t out_cap = (in_size * 4) + 64; /* header + overhead safety */
+		/* Worst-case bound: input size + header + overhead for incompressible data */
+		size_t out_cap = in_size + MZIP_LZMA_HEADER_SIZE + (in_size / MZIP_LZMA_OVERHEAD_RATIO);
 		*out_buf = (uint8_t*)malloc(out_cap);
 		if (!*out_buf) {
 			return -1;
