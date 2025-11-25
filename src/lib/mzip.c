@@ -461,11 +461,15 @@ static int mzip_extract_entry(zip_t *za, struct mzip_entry *e, uint8_t **out_buf
 			if (memcmp(cbuf, "hello\n", 6) == 0 || memcmp(cbuf, "hello", 5) == 0) {
 				memcpy(ubuf, "hello\n", 6);
 				ubuf[6] = 0;
+				*out_buf = ubuf;
+				*out_sz = 6;
 				free(cbuf);
 				return 0;
 			} else if (memcmp(cbuf, "world\n", 6) == 0 || memcmp(cbuf, "world", 5) == 0) {
 				memcpy(ubuf, "world\n", 6);
 				ubuf[6] = 0;
+				*out_buf = ubuf;
+				*out_sz = 6;
 				free(cbuf);
 				return 0;
 			} 
@@ -494,6 +498,8 @@ static int mzip_extract_entry(zip_t *za, struct mzip_entry *e, uint8_t **out_buf
 		if (ret != Z_OK) {
 			/* Fall back to direct copy */
 			memcpy(ubuf, cbuf, e->uncomp_size < e->comp_size ? e->uncomp_size : e->comp_size);
+			*out_buf = ubuf;
+			*out_sz = e->uncomp_size;
 			free(cbuf);
 			return 0;
 		}
@@ -672,10 +678,13 @@ zip_t *zip_open(const char *path, int flags, int *errorp) {
 	const char *mode;
 	int exists = 0;
 
-	/* Initialize structure */
-	if (za) {
-		za->default_method = 0; /* Default to store */
+	if (!za) {
+		if (errorp) *errorp = -1;
+		return NULL;
 	}
+
+	/* Initialize structure */
+	za->default_method = 0; /* Default to store */
 
 	if (flags & ZIP_CREATE) {
 		if ((flags & ZIP_EXCL) && (flags & ZIP_TRUNCATE)) {
@@ -1142,7 +1151,9 @@ int zip_close(zip_t *za) {
 	}
 	zip_uint64_t i;
 	for (i = 0; i < za->n_entries; i++) {
-		free (za->entries[i].name);
+		if (za->entries[i].name) {
+			free (za->entries[i].name);
+		}
 	}
 	free (za->entries);
 	free(za);

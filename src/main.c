@@ -218,6 +218,7 @@ static int sanitize_extract_path(const char *name, char *out, size_t outlen) {
     if (nlen >= (size_t)PATH_MAX) return -1;
 
     char tmp[PATH_MAX];
+    memset(tmp, 0, sizeof(tmp));
     /* Normalize backslashes to forward slashes */
     for (size_t i = 0; i <= nlen; ++i) tmp[i] = (name[i] == '\\') ? '/' : name[i];
 
