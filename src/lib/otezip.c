@@ -18,6 +18,7 @@
 #include <unistd.h>
 #include "otezip.h"
 #include "../include/zstream.h"
+#include "time.inc.c"
 
 #if defined(_WIN32) || defined(_WIN64)
 /* Ensure we have thread-safe fallback for localtime on Windows builds */
@@ -84,119 +85,6 @@ int otezip_ignore_zipbomb = 0;
 
 /* helper: little-endian readers/writers (ZIP format is little-endian) */
 
-/* Date/time conversion for ZIP entries */
-/* Convert current time to DOS date/time fields.
- * The DOS date format stores year as an offset from 1980 in 7 bits
- *(0..127 -> 1980..2107). To avoid generating out-of-range values or
- * relying on unchecked `time_t` behaviour on 32-bit platforms, this
- * implementation validates and clamps fields. If time retrieval or
- * conversion fails, it falls back to 1980-01-01 00:00:00.
- */
-/* Provide a small portable wrapper for thread-safe localtime when possible.
- * On POSIX systems prefer `localtime_r`; on Windows or when not available,
- * fall back to `localtime ()` and copy the result into the caller buffer. */
-static struct tm *otezip_localtime_r(const time_t *t, struct tm *out) {
-	/* Portable fallback: use non-reentrant `localtime ()` and copy the result.
-	 * This avoids implicit declaration issues on platforms that don't expose
-	 * `localtime_r` while remaining simple for this small utility. */
-	struct tm *tmp = localtime (t);
-	if (!tmp) {
-		return NULL;
-	}
-	*out = *tmp;
-	return out;
-}
-
-static void otezip_get_dostime(uint16_t *dos_time, uint16_t *dos_date) {
-	time_t now = time (NULL);
-	struct tm tm_buf;
-	struct tm *tm_ptr = NULL;
-
-	/* Prefer reentrant version when available */
-	if (now != (time_t)-1 && otezip_localtime_r (&now, &tm_buf) != NULL) {
-		tm_ptr = &tm_buf;
-	}
-	if (!tm_ptr && now != (time_t)-1) {
-		struct tm *tmp = localtime (&now);
-		if (tmp) {
-			/* copy into stack buffer to have a consistent pointer */
-			tm_buf = *tmp;
-			tm_ptr = &tm_buf;
-		}
-	}
-
-	/* Default to DOS epoch start if anything fails */
-	if (!tm_ptr) {
-		 *dos_time = 0; /* 00:00:00 -> all zero */
-		 *dos_date = 0; /* 1980-01-01 -> year offset 0, month 1, day 1 */
-		/* encode date: year offset 0, month 1, day 1 */
-		*dos_date = (uint16_t) (((0) << 9) | ((1) << 5) | 1);
-		return;
-	}
-
-	/* Extract and clamp fields to valid ranges to avoid overflow or
-	 * nonsensical dates on platforms with limited time_t ranges. */
-	int year = tm_ptr->tm_year + 1900; /* full year */
-	int year_off = year - 1980;
-	if (year_off < 0) {
-		year_off = 0;
-	}
-	if (year_off > 127) {
-		year_off = 127; /* DOS stores 7 bits */
-	}
-
-	int mon = tm_ptr->tm_mon + 1;
-	if (mon < 1) {
-		mon = 1;
-	}
-	if (mon > 12) {
-		mon = 12;
-	}
-
-	int day = tm_ptr->tm_mday;
-	if (day < 1) {
-		day = 1;
-	}
-	if (day > 31) {
-		day = 31;
-	}
-
-	int hour = tm_ptr->tm_hour;
-	if (hour < 0) {
-		hour = 0;
-	}
-	if (hour > 23) {
-		hour = 23;
-	}
-
-	int min = tm_ptr->tm_min;
-	if (min < 0) {
-		min = 0;
-	}
-	if (min > 59) {
-		min = 59;
-	}
-
-	int sec = tm_ptr->tm_sec;
-	if (sec < 0) {
-		sec = 0;
-	}
-	if (sec > 59) {
-		sec = 59;
-	}
-
-	/* DOS time stores seconds divided by 2 */
-	int sec2 = sec / 2;
-	if (sec2 < 0) {
-		sec2 = 0;
-	}
-	if (sec2 > 29) {
-		sec2 = 29;
-	}
-
-	*dos_time = (uint16_t) ((hour << 11) | (min << 5) | sec2);
-	*dos_date = (uint16_t) ((year_off << 9) | (mon << 5) | day);
-}
 static uint16_t otezip_rd16(const uint8_t *p) {
 	return (uint16_t) (p[0] | (p[1] << 8));
 }
