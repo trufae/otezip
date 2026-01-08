@@ -16,5 +16,13 @@ otezip_dep = declare_dependency(
   include_directories: otezip_inc
 )
 
+# Build the otezip executable
+executable('otezip',
+  'src/main.c',
+  link_with: otezip_lib,
+  include_directories: otezip_inc,
+  install: false
+)
+
 # For subproject usage
 otezip_subproject = true
