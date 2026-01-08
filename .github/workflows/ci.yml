@@ -157,7 +157,7 @@ jobs:
           cp dist/artifacts/build-windows/otezip.exe dist/release/otezip-windows.exe
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2.3.2
+        uses: softprops/action-gh-release@v2.5.0
         with:
           name: ${{ needs.check_release.outputs.tag_name }}
           tag_name: ${{ needs.check_release.outputs.tag_name }}
