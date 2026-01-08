@@ -8,7 +8,7 @@ RANLIB?=ranlib
 
 OTEZIP_OBJS=src/lib/otezip.o
 
-all: otezip
+all: otezip libotezip.a
 
 libotezip.a: src/lib/otezip.o
 	$(AR) rc $@ $(OTEZIP_OBJS)
