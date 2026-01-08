@@ -203,6 +203,25 @@ static long otezip_find_eocd(FILE *fp, uint8_t *eocd_out /*22+*/, size_t *cd_siz
 				continue;
 			}
 
+			/* Validate that the central directory starts with a valid CDH signature.
+			 * This handles files with embedded EOCD signatures in compressed data. */
+			if (entries > 0 && cd_size_tmp >= 4) {
+				long saved_pos = ftell (fp);
+				if (fseek (fp, (long)cd_ofs_tmp, SEEK_SET) != 0) {
+					continue;
+				}
+				uint8_t cd_sig[4];
+				if (otezip_read_fully (fp, cd_sig, 4) != 0) {
+					fseek (fp, saved_pos, SEEK_SET);
+					continue;
+				}
+				fseek (fp, saved_pos, SEEK_SET);
+				if (otezip_rd32 (cd_sig) != MZIP_SIG_CDH) {
+					/* CD doesn't start with valid header - try next EOCD candidate */
+					continue;
+				}
+			}
+
 			/* Everything looked sane; commit results */
 			*total_entries = entries;
 			*cd_size = cd_size_tmp;
