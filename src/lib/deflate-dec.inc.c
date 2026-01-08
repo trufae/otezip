@@ -32,10 +32,11 @@ typedef struct {
 	wrap_format wrap; /* Wrapper format */
 	int header_done; /* Has header been processed? */
 
-	/* Pending copy state (for resuming after Z_BUF_ERROR) */
+	/* Pending copy state (for resuming after output buffer full) */
 	int pending_copy; /* Non-zero if there's a pending copy operation */
 	int pending_length; /* Remaining bytes to copy */
 	int pending_distance; /* Distance for the copy */
+	int pending_literal; /* Pending literal byte (-1 if none) */
 } inflate_state;
 
 /* Get a bit from the input stream */
@@ -506,6 +507,7 @@ int inflateInit2(z_stream *strm, int windowBits) {
 	state->pending_copy = 0;
 	state->pending_length = 0;
 	state->pending_distance = 0;
+	state->pending_literal = -1;
 
 	strm->state = state;
 	strm->total_in = 0;
@@ -534,7 +536,7 @@ static int do_copy_from_window(z_stream *strm, inflate_state *state, int length,
 		state->pending_copy = 1;
 		state->pending_length = length;
 		state->pending_distance = distance;
-		return Z_BUF_ERROR;
+		return Z_OK; /* Need more output space, not an error */
 	}
 
 	state->pending_copy = 0;
@@ -578,6 +580,20 @@ int inflate(z_stream *strm, int flush) {
 			strm->total_in += skip;
 		}
 		state->header_done = 1;
+	}
+
+	/* Resume any pending literal first */
+	if (state->pending_literal >= 0) {
+		if (strm->avail_out == 0) {
+			return Z_OK; /* Need more output space */
+		}
+		*strm->next_out++ = (uint8_t)state->pending_literal;
+		strm->avail_out--;
+		strm->total_out++;
+		/* Add to window */
+		state->window[state->window_pos] = (uint8_t)state->pending_literal;
+		state->window_pos = (state->window_pos + 1) & (state->window_size - 1);
+		state->pending_literal = -1;
 	}
 
 	/* Resume any pending copy operation first */
@@ -681,7 +697,8 @@ int inflate(z_stream *strm, int flush) {
 				if (code < 256) {
 					/* Literal byte - need output space */
 					if (strm->avail_out == 0) {
-						return Z_BUF_ERROR;
+						state->pending_literal = code;
+						return Z_OK; /* Need more output space */
 					}
 					*strm->next_out++ = (uint8_t)code;
 					strm->avail_out--;
@@ -805,7 +822,7 @@ int inflate(z_stream *strm, int flush) {
 	}
 
 	if (strm->avail_out == 0) {
-		return Z_BUF_ERROR;
+		return Z_OK; /* Need more output space, not an error */
 	}
 
 	return ret;
