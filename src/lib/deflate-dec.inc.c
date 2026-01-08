@@ -299,34 +299,34 @@ static int read_uncompressed_block(z_stream *strm, inflate_state *state) {
 	return Z_OK;
 }
 
-/* Initialize fixed Huffman tables */
+/* Initialize fixed Huffman tables with correct canonical codes */
 static void init_fixed_huffman(inflate_state *state) {
-	/* Fixed tables as per deflate specification */
-	/* Literal/length codes */
-	for (int i = 0; i < 144; i++) {
-		state->literals.codes[i] = i;
-		state->literals.lengths[i] = 8;
+	/* Fixed literal/length code lengths as per deflate spec:
+	 * 0-143: 8 bits, 144-255: 9 bits, 256-279: 7 bits, 280-287: 8 bits
+	 */
+	uint8_t lengths[288];
+	for (int i = 0; i <= 143; i++) {
+		lengths[i] = 8;
 	}
-	for (int i = 144; i < 256; i++) {
-		state->literals.codes[i] = i;
-		state->literals.lengths[i] = 9;
+	for (int i = 144; i <= 255; i++) {
+		lengths[i] = 9;
 	}
-	for (int i = 256; i < 280; i++) {
-		state->literals.codes[i] = i;
-		state->literals.lengths[i] = 7;
+	for (int i = 256; i <= 279; i++) {
+		lengths[i] = 7;
 	}
-	for (int i = 280; i < 288; i++) {
-		state->literals.codes[i] = i;
-		state->literals.lengths[i] = 8;
+	for (int i = 280; i <= 287; i++) {
+		lengths[i] = 8;
 	}
-	state->literals.count = 288;
 
-	/* Distance codes */
+	/* Build the Huffman table using canonical code assignment */
+	build_huffman_tree (&state->literals, lengths, 288);
+
+	/* Fixed distance code lengths: all 5 bits */
+	uint8_t dist_lengths[32];
 	for (int i = 0; i < 32; i++) {
-		state->distances.codes[i] = i;
-		state->distances.lengths[i] = 5;
+		dist_lengths[i] = 5;
 	}
-	state->distances.count = 32;
+	build_huffman_tree (&state->distances, dist_lengths, 32);
 }
 
 /* ----------- Main decoder API functions ----------- */
@@ -380,8 +380,9 @@ int inflate(z_stream *strm, int flush) {
 	inflate_state *state = (inflate_state *)strm->state;
 	int ret = Z_OK;
 
-	/* Main decompression loop */
-	while (strm->avail_in > 0 && strm->avail_out > 0) {
+	/* Main decompression loop - continue even when avail_out is 0
+	 * to check for end-of-block marker */
+	while (strm->avail_in > 0) {
 		/* Process based on current state */
 		switch (state->state) {
 		case 0: /* Block header */
@@ -440,89 +441,40 @@ int inflate(z_stream *strm, int flush) {
 				int code = 0;
 				int length = 0;
 
-				/* Decode Huffman code based on current block type */
-				if (state->btype == BLOCK_FIXED) {
-					/* For fixed Huffman, we know the bit patterns */
-					if (get_bit (strm, state) == 0) {
-						/* 0xxx xxxx - 8 bit code for values 0-143 */
-						code = get_bits (strm, state, 7);
-						if (code < 0) {
-							return Z_DATA_ERROR;
-						}
-						code = (0 << 7) | code; /* Add the 0 bit we already read */
-					} else {
-						int next_bit = get_bit (strm, state);
-						if (next_bit < 0) {
-							return Z_DATA_ERROR;
-						}
-						if (next_bit == 0) {
-							/* 10xx xxxx - 8 bit code for values 144-255 */
-							code = get_bits (strm, state, 6);
-							if (code < 0) {
-								return Z_DATA_ERROR;
-							}
-							code = (0b10 << 6) | code; /* Add the 10 bits we already read */
-							code += 144; /* Adjust to actual value */
-						} else {
-							int third_bit = get_bit (strm, state);
-							if (third_bit < 0) {
-								return Z_DATA_ERROR;
-							}
-
-							if (third_bit == 0) {
-								/* 110x xxxx - 7 bit code for values 256-279 */
-								code = get_bits (strm, state, 4);
-								if (code < 0) {
-									return Z_DATA_ERROR;
-								}
-								code = (0b110 << 4) | code; /* Add the 110 bits we already read */
-								code = code - (0b110 << 4) + 256; /* Adjust to actual value */
-							} else {
-								/* 111x xxxx - 8 bit code for values 280-287 */
-								code = get_bits (strm, state, 4);
-								if (code < 0) {
-									return Z_DATA_ERROR;
-								}
-								code = (0b111 << 4) | code; /* Add the 111 bits we already read */
-								code = code - (0b111 << 4) + 280; /* Adjust to actual value */
-							}
-						}
+				/* Decode Huffman code - same method for both fixed and dynamic */
+				code = 0;
+				for (length = 1; length <= 15; length++) {
+					int bit = get_bit (strm, state);
+					if (bit < 0) {
+						return Z_DATA_ERROR;
 					}
-				} else if (state->btype == BLOCK_DYNAMIC) {
-					/* For dynamic Huffman, use the constructed tables */
-					code = 0;
-					for (length = 1; length <= 15; length++) {
-						int bit = get_bit (strm, state);
-						if (bit < 0) {
-							return Z_DATA_ERROR;
-						}
-						code = (code << 1) | bit;
+					code = (code << 1) | bit;
 
-						/* Look for matching code */
-						int found = -1;
-						for (int i = 0; i < state->literals.count; i++) {
-							if (state->literals.lengths[i] == length &&
-								state->literals.codes[i] == code) {
-								found = i;
-								break;
-							}
-						}
-						if (found >= 0) {
-							code = found;
+					/* Look for matching code */
+					int found = -1;
+					for (int i = 0; i < state->literals.count; i++) {
+						if (state->literals.lengths[i] == length &&
+							state->literals.codes[i] == code) {
+							found = i;
 							break;
 						}
 					}
-
-					if (length > 15) {
-						return Z_DATA_ERROR; /* Invalid Huffman code */
+					if (found >= 0) {
+						code = found;
+						break;
 					}
-				} else {
-					return Z_DATA_ERROR; /* Invalid block type */
+				}
+
+				if (length > 15) {
+					return Z_DATA_ERROR; /* Invalid Huffman code */
 				}
 
 				/* Process the code */
 				if (code < 256) {
-					/* Literal byte */
+					/* Literal byte - need output space */
+					if (strm->avail_out == 0) {
+						return Z_BUF_ERROR;
+					}
 					*strm->next_out++ = (uint8_t)code;
 					strm->avail_out--;
 					strm->total_out++;
@@ -540,14 +492,10 @@ int inflate(z_stream *strm, int flush) {
 					/* Length code */
 					/* Determine base length and extra bits */
 					static const uint16_t length_base[] = {
-						3, 4, 5, 6, 7, 8, 9, 10, 11, 13,
-						15, 17, 19, 23, 27, 31, 35, 43, 51, 59,
-						67, 83, 99, 115, 131, 163, 195, 227, 258
+						3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258
 					};
 					static const uint8_t length_extra[] = {
-						0, 0, 0, 0, 0, 0, 0, 0, 1, 1,
-						1, 1, 2, 2, 2, 2, 3, 3, 3, 3,
-						4, 4, 4, 4, 5, 5, 5, 5, 0
+						0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0
 					};
 
 					int length_idx = code - 257;
@@ -562,57 +510,38 @@ int inflate(z_stream *strm, int flush) {
 						length += extra;
 					}
 
-					/* Now read distance code */
-					int distance_code;
-					if (state->btype == BLOCK_FIXED) {
-						/* For fixed Huffman, distance code is always 5 bits */
-						distance_code = get_bits (strm, state, 5);
-						if (distance_code < 0) {
+					/* Now read distance code - same for fixed and dynamic */
+					int distance_code = -1;
+					code = 0;
+					int len;
+					for (len = 1; len <= 15; len++) {
+						int bit = get_bit (strm, state);
+						if (bit < 0) {
 							return Z_DATA_ERROR;
 						}
-					} else if (state->btype == BLOCK_DYNAMIC) {
-						/* For dynamic Huffman, use the distance table */
-						code = 0;
-						int len;
-						for (len = 1; len <= 15; len++) {
-							int bit = get_bit (strm, state);
-							if (bit < 0) {
-								return Z_DATA_ERROR;
-							}
-							code = (code << 1) | bit;
+						code = (code << 1) | bit;
 
-							/* Look for matching distance code */
-							int found = -1;
-							for (int i = 0; i < state->distances.count; i++) {
-								if (state->distances.lengths[i] == len &&
-									state->distances.codes[i] == code) {
-									found = i;
-									break;
-								}
-							}
-							if (found >= 0) {
-								distance_code = found;
+						/* Look for matching distance code */
+						for (int i = 0; i < state->distances.count; i++) {
+							if (state->distances.lengths[i] == len &&
+								state->distances.codes[i] == code) {
+								distance_code = i;
 								break;
 							}
 						}
-						if (len > 15) {
-							return Z_DATA_ERROR; /* Invalid Huffman code */
+						if (distance_code >= 0) {
+							break;
 						}
-					} else {
-						return Z_DATA_ERROR; /* Invalid block type */
+					}
+					if (len > 15 || distance_code < 0) {
+						return Z_DATA_ERROR; /* Invalid Huffman code */
 					}
 					/* Convert to actual distance */
 					static const uint16_t dist_base[] = {
-						1, 2, 3, 4, 5, 7, 9, 13, 17, 25,
-						33, 49, 65, 97, 129, 193, 257, 385, 513, 769,
-						1025, 1537, 2049, 3073, 4097, 6145,
-						8193, 12289, 16385, 24577
+						1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577
 					};
 					static const uint8_t dist_extra[] = {
-						0, 0, 0, 0, 1, 1, 2, 2, 3, 3,
-						4, 4, 5, 5, 6, 6, 7, 7, 8, 8,
-						9, 9, 10, 10, 11, 11,
-						12, 12, 13, 13
+						0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13
 					};
 
 					int distance = dist_base[distance_code];
@@ -673,6 +602,11 @@ int inflate(z_stream *strm, int flush) {
 	}
 
 	/* If we get here, we've run out of input or output space */
+	/* But first check if we've actually finished decompression */
+	if (state->final_block && state->state == 0) {
+		return Z_STREAM_END;
+	}
+
 	if (strm->avail_out == 0) {
 		return Z_BUF_ERROR;
 	}
