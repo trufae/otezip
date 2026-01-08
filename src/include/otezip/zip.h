@@ -86,7 +86,8 @@ struct otezip_entry {
     uint32_t   external_attr;       /* External file attributes (permissions) */
 };
 
-struct otezip_archive {
+/* Use libzip-compatible struct names for full compatibility */
+struct zip {
     FILE               *fp;
     struct otezip_entry  *entries;
     zip_uint64_t        n_entries;
@@ -95,13 +96,13 @@ struct otezip_archive {
     uint16_t            default_method; /* Default compression method for new entries */
 };
 
-struct otezip_file {
+struct zip_file {
     uint8_t   *data;   /* complete uncompressed data                 */
     uint32_t   size;
     zip_uint64_t pos;  /* current read position for zip_fread       */
 };
 
-struct otezip_src_buf {
+struct zip_source {
     const void *buf;
     zip_uint64_t len;
     int freep;
@@ -113,10 +114,15 @@ struct otezip_error {
     int sys_err;   /* copy of errno (E*) or zlib error code */
 };
 
-typedef struct otezip_archive   zip_t;      /* opaque archive handle        */
-typedef struct otezip_file      zip_file_t; /* opaque file-in-memory handle */
-typedef struct otezip_src_buf   zip_source_t;/* stub                          */
-typedef struct otezip_error     zip_error_t; /* error structure              */
+/* Backward compatibility: keep otezip names as aliases */
+typedef struct zip         otezip_archive;
+typedef struct zip_file    otezip_file;
+typedef struct zip_source  otezip_src_buf;
+
+typedef struct zip         zip_t;      /* opaque archive handle        */
+typedef struct zip_file    zip_file_t; /* opaque file-in-memory handle */
+typedef struct zip_source  zip_source_t;/* stub                          */
+typedef struct otezip_error zip_error_t; /* error structure              */
 
 /* Only flag we meaningfully accept at the moment. */
 #ifndef ZIP_RDONLY

@@ -129,8 +129,8 @@ static int create_or_add_files(const char *path, char **files, int num_files, in
 
 	/* Modify next entry to add to use specified compression method */
 	if (compression_method != 0) {
-		/* For this mzip structure, store the compression method in the mzip_archive */
-		((struct otezip_archive *)za)->default_method = compression_method;
+		/* For this mzip structure, store the compression method in the archive */
+		((struct zip *)za)->default_method = compression_method;
 	}
 
 	for (int i = 0; i < num_files; i++) {
