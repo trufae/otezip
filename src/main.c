@@ -71,6 +71,20 @@ static int g_force = 0;
 #ifndef S_ISLNK
 #define S_ISLNK(mode) 0
 #endif
+#ifndef S_ISDIR
+#define S_ISDIR(mode) (((mode) & _S_IFMT) == _S_IFDIR)
+#endif
+#ifndef S_ISREG
+#define S_ISREG(mode) (((mode) & _S_IFMT) == _S_IFREG)
+#endif
+/* MSVC doesn't define mode_t or ssize_t */
+#ifdef _MSC_VER
+typedef unsigned short mode_t;
+typedef intptr_t ssize_t;
+#define open _open
+#define close _close
+#define write _write
+#endif
 #else
 #define OTEZIP_MKDIR(path, mode) mkdir((path),(mode))
 #define OTEZIP_LSTAT(path, buf) lstat((path),(buf))
