@@ -31,8 +31,7 @@
 extern int inflateInit2(z_stream *strm, int windowBits);
 extern int inflate(z_stream *strm, int flush);
 extern int inflateEnd(z_stream *strm);
-extern int deflateInit2(z_stream *strm, int level, int method, int windowBits,
-	int memLevel, int strategy);
+extern int deflateInit2(z_stream *strm, int level, int method, int windowBits, int memLevel, int strategy);
 extern int deflate(z_stream *strm, int flush);
 extern int deflateEnd(z_stream *strm);
 
@@ -288,10 +287,8 @@ static int sanitize_extract_path(const char *name, char *out, size_t outlen) {
 			if (segc == 0) {
 				if (g_extract_policy == POLICY_REJECT) {
 					return -1;
-				} else if (g_extract_policy == POLICY_STRIP) {
-					/* drop leading .. */
 				} else {
-					/* POLICY_ALLOW: treat as no-op */
+					/* POLICY_STRIP: drop leading .., POLICY_ALLOW: treat as no-op */
 				}
 			} else {
 				segc--;
@@ -642,8 +639,7 @@ static int gunzip_file(const char *input_path, const char *output_path) {
 			continue;
 		}
 		if (ret != Z_OK) {
-			fprintf (stderr, "inflate failed: %d (avail_in=%u avail_out=%u total_out=%lu)\n",
-				ret, strm.avail_in, strm.avail_out, (unsigned long)strm.total_out);
+			fprintf (stderr, "inflate failed: %d (avail_in=%u avail_out=%u total_out=%lu)\n", ret, strm.avail_in, strm.avail_out, (unsigned long)strm.total_out);
 			inflateEnd (&strm);
 			free (output_data);
 			free (input_data);
@@ -674,7 +670,10 @@ static int gunzip_file(const char *input_path, const char *output_path) {
 	free (output_data);
 
 	printf ("Decompressed %s -> %s (%ld -> %lu bytes)\n",
-		input_path, output_path, input_size, (unsigned long)output_size);
+		input_path,
+		output_path,
+		input_size,
+		(unsigned long)output_size);
 	return 0;
 }
 
@@ -718,8 +717,7 @@ static int gzip_file(const char *input_path, const char *output_path) {
 	z_stream strm;
 	memset (&strm, 0, sizeof (strm));
 
-	int ret = deflateInit2 (&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
-		MAX_WBITS + 16, 8, Z_DEFAULT_STRATEGY);
+	int ret = deflateInit2 (&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, MAX_WBITS + 16, 8, Z_DEFAULT_STRATEGY);
 	if (ret != Z_OK) {
 		fprintf (stderr, "deflateInit2 failed: %d\n", ret);
 		free (input_data);
@@ -777,7 +775,10 @@ static int gzip_file(const char *input_path, const char *output_path) {
 	free (output_data);
 
 	printf ("Compressed %s -> %s (%ld -> %lu bytes)\n",
-		input_path, output_path, input_size, (unsigned long)output_size);
+		input_path,
+		output_path,
+		input_size,
+		(unsigned long)output_size);
 	return 0;
 }
 
@@ -815,7 +816,7 @@ int main(int argc, char **argv) {
 			/* Remove .gz extension if present, else add .out */
 			size_t len = strlen (input_path);
 			if (len > 3 && strcmp (input_path + len - 3, ".gz") == 0) {
-				snprintf (output_path, sizeof (output_path), "%.*s", (int)(len - 3), input_path);
+				snprintf (output_path, sizeof (output_path), "%.*s", (int) (len - 3), input_path);
 			} else {
 				snprintf (output_path, sizeof (output_path), "%s.out", input_path);
 			}
@@ -939,7 +940,7 @@ int main(int argc, char **argv) {
 
 	/* Parse CRC verification option: --verify-crc */
 	for (i = 3; i < argc; i++) {
-		if (strcmp (argv[i], "--verify-crc") == 0) {
+		if (argv[i] && strcmp (argv[i], "--verify-crc") == 0) {
 			/* enable strict CRC verification in the mzip backend */
 			otezip_verify_crc = 1;
 		}

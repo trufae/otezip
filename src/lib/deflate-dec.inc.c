@@ -598,7 +598,7 @@ int inflate(z_stream *strm, int flush) {
 
 	/* Resume any pending copy operation first */
 	if (state->pending_copy) {
-		ret = do_copy_from_window (strm, state, state->pending_length, state->pending_distance);
+		(void)do_copy_from_window (strm, state, state->pending_length, state->pending_distance);
 		if (state->pending_copy) {
 			return Z_OK; /* Still have pending copy, need more output space */
 		}
@@ -786,7 +786,7 @@ int inflate(z_stream *strm, int flush) {
 					}
 
 					/* Copy bytes using helper (handles partial copies) */
-					ret = do_copy_from_window (strm, state, length, distance);
+					(void)do_copy_from_window (strm, state, length, distance);
 					if (state->pending_copy) {
 						return Z_OK; /* Need more output space */
 					}

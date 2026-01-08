@@ -1579,8 +1579,6 @@ static int otezip_replace_entry_data(zip_t *za, zip_uint64_t index, zip_source_t
 		return -1;
 	}
 	struct otezip_entry *e = &za->entries[index];
-	/* Free old data if present */
-	free ((void *)src->buf);
 	/* Update entry with new source data */
 	e->uncomp_size = (uint32_t)src->len;
 	e->crc32 = otezip_crc32 (0, src->buf, src->len);
