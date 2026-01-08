@@ -27,7 +27,7 @@
 #ifndef ssize_t
 #define ssize_t int
 #endif
-static int mkstemp(char *template) {
+static int otezip_mkstemp(char *template) {
 	if (_mktemp_s (template, strlen (template) + 1) != 0) {
 		return -1;
 	}
@@ -35,6 +35,7 @@ static int mkstemp(char *template) {
 }
 #else
 #include <unistd.h>
+#define otezip_mkstemp mkstemp
 #endif
 
 #include "../include/otezip/zip.h"
@@ -1367,7 +1368,7 @@ zip_t *zip_open_from_source(zip_source_t *src, int flags, zip_error_t *error) {
 	 * we create a temporary file and write the buffer to it,
 	 * then open the archive normally. */
 	char tmp_path[] = "/tmp/otezip_XXXXXX";
-	int fd = mkstemp (tmp_path);
+	int fd = otezip_mkstemp (tmp_path);
 	if (fd < 0) {
 		return NULL;
 	}

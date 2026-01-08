@@ -641,8 +641,8 @@ static int gunzip_file(const char *input_path, const char *output_path) {
 			continue;
 		}
 		if (ret != Z_OK) {
-			fprintf (stderr, "inflate failed: %d (avail_in=%u avail_out=%u total_out=%u)\n",
-				ret, strm.avail_in, strm.avail_out, strm.total_out);
+			fprintf (stderr, "inflate failed: %d (avail_in=%u avail_out=%u total_out=%lu)\n",
+				ret, strm.avail_in, strm.avail_out, (unsigned long)strm.total_out);
 			inflateEnd (&strm);
 			free (output_data);
 			free (input_data);

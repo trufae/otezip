@@ -332,7 +332,7 @@ int zstdCompress(z_stream *strm, int flush) {
 
 		/* Decide whether to write compressed or raw block */
 		uint8_t block_header = 0;
-		uint8_t *block_content;
+		const uint8_t *block_content;
 		uint32_t content_size;
 
 		if (compressed_size > 0 && (uint32_t)compressed_size < block_size) {
