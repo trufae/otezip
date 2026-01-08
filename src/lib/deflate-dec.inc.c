@@ -825,7 +825,8 @@ int inflate(z_stream *strm, int flush) {
 		return Z_OK; /* Need more output space, not an error */
 	}
 
-	return ret;
+	/* We have output space but no input - need more input data */
+	return Z_BUF_ERROR;
 }
 
 int inflateEnd(z_stream *strm) {
