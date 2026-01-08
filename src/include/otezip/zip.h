@@ -18,7 +18,8 @@
  * ------------------
  *  • Single-disk, non-spanned ZIP files created with the standard PKZIP spec.
  *  • Compression methods 0 (stored) and 8 (deflate).
- *  • No encrypted entries, no ZIP64, no data descriptors (general flag bit 3).
+ *  • No encrypted entries, no ZIP64.
+ *  • Data descriptors (general flag bit 3) supported via central directory.
  *
  * License: MIT / 0-BSD – do whatever you want; attribution appreciated.
  */

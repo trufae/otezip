@@ -276,16 +276,10 @@ static int otezip_load_central(zip_t *za) {
 		}
 		const uint8_t *h = cd_buf + off;
 
-		/* Reject entries that rely on data descriptors (general purpose
-		 * bit 3). This project explicitly does not support data descriptors
-		 *(see README). If we encounter them, fail early with a clear
-		 * error instead of continuing in an inconsistent state. */
-		uint16_t gp_flag = otezip_rd16 (h + 8);
-		if (gp_flag & 0x0008) {
-			fprintf (stderr, "mzip: data descriptors (general purpose flag bit 3) not supported\n");
-			free (cd_buf);
-			return OTEZIP_ERR_INCONS;
-		}
+		/* Data descriptors (general purpose bit 3): when set, the local
+		 * file header has CRC/sizes zeroed and actual values follow the
+		 * compressed data. However, the central directory always stores
+		 * the correct values, so we can safely use those. No need to reject. */
 
 		uint16_t filename_len = otezip_rd16 (h + 28);
 		uint16_t extra_len = otezip_rd16 (h + 30);
@@ -364,15 +358,10 @@ static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out
 		return -1;
 	}
 
-	/* Check general purpose flag in local header: reject data descriptors
-	 *(bit 3). The library does not support deferred CRC/size via
-	 * data descriptors. Fail with a descriptive error to avoid entering
-	 * an inconsistent state. */
-	uint16_t lfh_gp = otezip_rd16 (lfh + 6);
-	if (lfh_gp & 0x0008) {
-		fprintf (stderr, "mzip: data descriptors (general purpose flag bit 3) not supported\n");
-		return -1;
-	}
+	/* Data descriptors (bit 3): when set, the local file header stores
+	 * CRC/sizes as 0 and actual values appear after compressed data.
+	 * We rely on the central directory values (stored in entry e) which
+	 * are always correct, so we can safely proceed. */
 	uint16_t fn_len = otezip_rd16 (lfh + 26);
 	uint16_t extra_len = otezip_rd16 (lfh + 28);
 
