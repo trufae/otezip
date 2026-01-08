@@ -81,7 +81,7 @@ static inline uLong compressBound(uLong sourceLen) {
 }
 
 /* Unified z_stream definition */
-#include "otezip/zstream.h"
+#include "../include/otezip/zstream.h"
 
 /* ------------- Function Prototypes ------------- */
 

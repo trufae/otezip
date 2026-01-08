@@ -53,7 +53,7 @@
 /* ------------- Data Structures ------------- */
 
 /* Unified z_stream declaration */
-#include "otezip/zstream.h"
+#include "../include/otezip/zstream.h"
 
 /* LZMA decompression context */
 typedef struct {
