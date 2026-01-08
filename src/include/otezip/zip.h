@@ -31,7 +31,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "otezip/config.h"
+#include "./config.h"
 
 /* Little-endian read/write helpers (portable, unaligned-safe).
  * Use these when reading/writing multi-byte fields from on-disk formats
