@@ -8,7 +8,8 @@ otezip_inc = include_directories('src/include/otezip')
 otezip_lib = static_library('otezip',
   otezip_src,
   include_directories: otezip_inc,
-  install: false
+  install: false,
+  pic: true
 )
 
 otezip_dep = declare_dependency(

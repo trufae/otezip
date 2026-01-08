@@ -46,7 +46,7 @@ clean:
 
 # Object file build rules
 src/lib/otezip.o: src/lib/otezip.c src/include/otezip/zip.h src/include/otezip/config.h
-	$(CC) $(CFLAGS) -I src/include -c src/lib/otezip.c -o $@
+	$(CC) $(CFLAGS) -fPIC -I src/include -c src/lib/otezip.c -o $@
 
 fmt indent:
 	find . -name "*.c" -exec clang-format-radare2 -i {} \;
