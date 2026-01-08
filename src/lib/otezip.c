@@ -151,6 +151,10 @@ static void otezip_wr32(uint8_t *p, uint32_t v) {
 
 /* ----  internal helpers  ---- */
 
+/* Return codes for error handling */
+#define OTEZIP_ERR_READ -1      /* File read/seek error */
+#define OTEZIP_ERR_INCONS -2    /* Archive structure inconsistent */
+
 static inline int otezip_read_fully(FILE *fp, void *dst, size_t n) {
 	return fread (dst, 1, n, fp) == n? 0: -1;
 }
@@ -159,11 +163,11 @@ static inline int otezip_read_fully(FILE *fp, void *dst, size_t n) {
 static long otezip_find_eocd(FILE *fp, uint8_t *eocd_out /*22+*/, size_t *cd_size, uint32_t *cd_ofs, uint16_t *total_entries) {
 	long file_size;
 	if (fseek (fp, 0, SEEK_END) != 0) {
-		return -1;
+		return OTEZIP_ERR_READ;
 	}
 	file_size = ftell (fp);
 	if (file_size < 22) {
-		return -1;
+		return OTEZIP_ERR_INCONS;
 	}
 	const size_t max_back = 0x10000 + 22; /* spec: comment <= 65535 */
 	/* Ensure both operands of the?: have the same unsigned type to avoid
@@ -172,11 +176,11 @@ static long otezip_find_eocd(FILE *fp, uint8_t *eocd_out /*22+*/, size_t *cd_siz
 	size_t search_len = (file_size < (long)max_back)? (size_t)file_size: max_back;
 
 	if (fseek (fp, file_size - (long)search_len, SEEK_SET) != 0) {
-		return -1;
+		return OTEZIP_ERR_READ;
 	}
 	uint8_t buf[65558];
 	if (otezip_read_fully (fp, buf, search_len) != 0) {
-		return -1;
+		return OTEZIP_ERR_READ;
 	}
 	size_t i;
 	for (i = search_len - 22; i != (size_t)-1; --i) {
@@ -206,7 +210,7 @@ static long otezip_find_eocd(FILE *fp, uint8_t *eocd_out /*22+*/, size_t *cd_siz
 		}
 	}
 	/* not found */
-	return -1;
+	return OTEZIP_ERR_INCONS;
 }
 
 /* parse central directory into array of otezip_entry */
@@ -215,39 +219,42 @@ static int otezip_load_central(zip_t *za) {
 	size_t cd_size;
 	uint32_t cd_ofs;
 	uint16_t n_entries;
+	long eocd_pos;
 
-	if (otezip_find_eocd (za->fp, eocd, &cd_size, &cd_ofs, &n_entries) < 0) {
-		return -1;
+	eocd_pos = otezip_find_eocd (za->fp, eocd, &cd_size, &cd_ofs, &n_entries);
+	if (eocd_pos < 0) {
+		/* Return the specific error code from find_eocd */
+		return (int)eocd_pos;
 	}
 
 	/* Validate central directory against actual file size to avoid
 	 * out-of-bounds reads or huge allocations. */
 	if (fseek (za->fp, 0, SEEK_END) != 0) {
-		return -1;
+		return OTEZIP_ERR_READ;
 	}
 	long file_size_long = ftell (za->fp);
 	if (file_size_long < 0) {
-		return -1;
+		return OTEZIP_ERR_READ;
 	}
 	uint64_t file_size = (uint64_t)file_size_long;
 	if ((uint64_t)cd_ofs + (uint64_t)cd_size > file_size) {
-		return -1;
+		return OTEZIP_ERR_INCONS;
 	}
 
 	/* read entire central directory */
 	if (fseek (za->fp, cd_ofs, SEEK_SET) != 0) {
-		return -1;
+		return OTEZIP_ERR_READ;
 	}
 	if (cd_size == 0) {
-		return -1;
+		return OTEZIP_ERR_INCONS;
 	}
 	uint8_t *cd_buf = (uint8_t *)malloc (cd_size);
 	if (!cd_buf) {
-		return -1;
+		return OTEZIP_ERR_READ;
 	}
 	if (otezip_read_fully (za->fp, cd_buf, cd_size) != 0) {
 		free (cd_buf);
-		return -1;
+		return OTEZIP_ERR_READ;
 	}
 
 	za->entries = (struct otezip_entry *)calloc (n_entries, sizeof (struct otezip_entry));
@@ -255,7 +262,7 @@ static int otezip_load_central(zip_t *za) {
 
 	if (!za->entries) {
 		free (cd_buf);
-		return -1;
+		return OTEZIP_ERR_READ;
 	}
 
 	size_t off = 0;
@@ -264,7 +271,7 @@ static int otezip_load_central(zip_t *za) {
 		/* Ensure we have at least the fixed-size central header available */
 		if (off + 46 > cd_size || otezip_rd32 (cd_buf + off) != MZIP_SIG_CDH) {
 			free (cd_buf);
-			return -1; /* malformed */
+			return OTEZIP_ERR_INCONS; /* malformed */
 		}
 		const uint8_t *h = cd_buf + off;
 
@@ -276,7 +283,7 @@ static int otezip_load_central(zip_t *za) {
 		if (gp_flag & 0x0008) {
 			fprintf (stderr, "mzip: data descriptors (general purpose flag bit 3) not supported\n");
 			free (cd_buf);
-			return -1;
+			return OTEZIP_ERR_INCONS;
 		}
 
 		uint16_t filename_len = otezip_rd16 (h + 28);
@@ -299,20 +306,20 @@ static int otezip_load_central(zip_t *za) {
 		 * more than our allowed maximum. */
 		if ((uint64_t)e->comp_size > MZIP_MAX_PAYLOAD || (uint64_t)e->uncomp_size > MZIP_MAX_PAYLOAD) {
 			free (cd_buf);
-			return -1;
+			return OTEZIP_ERR_INCONS;
 		}
 		e->external_attr = otezip_rd32 (h + 38);
 
 		e->name = (char *)malloc (filename_len + 1u);
 		if (!e->name) {
 			free (cd_buf);
-			return -1;
+			return OTEZIP_ERR_READ;
 		}
 		/* Ensure the filename bytes are within the central directory buffer */
 		if ((size_t) (46 + filename_len) > cd_size - off) {
 			free (e->name);
 			free (cd_buf);
-			return -1;
+			return OTEZIP_ERR_INCONS;
 		}
 		memcpy (e->name, h + 46, filename_len);
 		e->name[filename_len] = '\0';
@@ -321,7 +328,7 @@ static int otezip_load_central(zip_t *za) {
 		uint64_t advance = 46 + (uint64_t)filename_len + (uint64_t)extra_len + (uint64_t)comment_len;
 		if (advance > (uint64_t)cd_size - off) {
 			free (cd_buf);
-			return -1;
+			return OTEZIP_ERR_INCONS;
 		}
 		off += (size_t)advance;
 	}
@@ -678,7 +685,7 @@ zip_t *zip_open(const char *path, int flags, int *errorp) {
 	FILE *fp = fopen (path, mode);
 	if (!fp) {
 		if (errorp) {
-			*errorp = -1;
+			*errorp = ZIP_ER_OPEN;
 		}
 		free (za);
 		return NULL;
@@ -686,11 +693,19 @@ zip_t *zip_open(const char *path, int flags, int *errorp) {
 	za->fp = fp;
 	if (za->mode == 0 || (exists && ! (flags & ZIP_TRUNCATE))) {
 		/* Load central directory for existing archive */
-		if (otezip_load_central (za) != 0) {
-			zip_close (za);
+		int load_result = otezip_load_central (za);
+		if (load_result != 0) {
+			/* Convert internal error codes to libzip error codes */
 			if (errorp) {
-				*errorp = -1;
+				if (load_result == OTEZIP_ERR_READ) {
+					*errorp = ZIP_ER_READ;
+				} else if (load_result == OTEZIP_ERR_INCONS) {
+					*errorp = ZIP_ER_INCONS;
+				} else {
+					*errorp = ZIP_ER_NOZIP; /* Unknown error - not a zip */
+				}
 			}
+			zip_close (za);
 			return NULL;
 		}
 

@@ -149,6 +149,9 @@ typedef struct otezip_error     zip_error_t; /* error structure              */
 #define ZIP_ER_EXISTS 10          /* File already exists */
 #define ZIP_ER_NOZIP 19           /* Not a zip archive */
 #define ZIP_ER_RDONLY 25          /* Read-only archive */
+#define ZIP_ER_OPEN 11            /* Can't open file */
+#define ZIP_ER_READ 5             /* Read error */
+#define ZIP_ER_INCONS 21          /* Zip archive inconsistent */
 
 /* zip_stat flags */
 #define ZIP_STAT_NAME 0x0001u
