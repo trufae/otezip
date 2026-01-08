@@ -41,6 +41,11 @@ test2:
 	CFLAGS="-fsanitize=address $(CFLAGS)" $(MAKE) -C test
 	rm -rf build
 
+asan: clean
+	meson build -Db_sanitize=address && ninja -C build
+	cp -f build/otezip ./otezip
+	cp -f build/libotezip.a ./libotezip.a
+
 clean:
 	rm -rf build otezip libotezip.a $(OTEZIP_OBJS)
 
@@ -51,4 +56,4 @@ src/lib/otezip.o: src/lib/otezip.c src/include/otezip/zip.h src/include/otezip/c
 fmt indent:
 	find . -name "*.c" -exec clang-format-radare2 -i {} \;
 
-.PHONY: all mall clean install uninstall test test2 fmt-indent
+.PHONY: all mall clean install uninstall test test2 asan fmt-indent
