@@ -4,12 +4,15 @@ on:
   push:
     branches: [ ]
 
+permissions:
+  contents: write
+
 jobs:
   build-linux:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y meson ninja-build
@@ -32,7 +35,7 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install dependencies
         run: brew install meson ninja
@@ -52,7 +55,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
@@ -146,6 +149,13 @@ jobs:
         with:
           path: dist/artifacts
 
+      - name: Prepare release files
+        run: |
+          mkdir -p dist/release
+          cp dist/artifacts/build-linux/otezip dist/release/otezip-linux
+          cp dist/artifacts/build-macos/otezip dist/release/otezip-macos
+          cp dist/artifacts/build-windows/otezip.exe dist/release/otezip-windows.exe
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2.3.2
         with:
@@ -157,6 +167,4 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            dist/artifacts/build-linux/otezip
-            dist/artifacts/build-macos/otezip
-            dist/artifacts/build-windows/otezip.exe
+            dist/release/*
