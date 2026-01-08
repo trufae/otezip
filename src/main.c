@@ -1,4 +1,4 @@
-/* main.c – Tiny demo utility for otezip.h
+/* main.c – Tiny demo utility for otezip/zip.h
  * Build:  gcc -std=c99 -DOTEZIP_IMPLEMENTATION main.c -lz -o otezip
  * Usage:  ./mzip -l  archive.zip   # list files
  *         ./mzip -x  archive.zip   # extract into current directory
@@ -11,8 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include "config.h"
-#include "otezip.h"
+#include "otezip/config.h"
+#include "otezip/zip.h"
 
 #include <limits.h>
 #include <sys/stat.h>
@@ -123,8 +123,7 @@ static int create_or_add_files(const char *path, char **files, int num_files, in
 
 	zip_t *za = zip_open (path, flags, &err);
 	if (!za) {
-		fprintf (stderr, "Failed to %s %s (err=%d)\n",
-			create_mode? "create": "open", path, err);
+		fprintf (stderr, "Failed to %s %s (err=%d)\n", create_mode? "create": "open", path, err);
 		return 1;
 	}
 
@@ -680,8 +679,7 @@ int main(int argc, char **argv) {
 		return extract_all (zip_path);
 	} else if (mode_create || mode_append) {
 		if (argc < 4) {
-			fprintf (stderr, "Error: No files specified to %s.\n",
-				mode_create? "create archive with": "add to archive");
+			fprintf (stderr, "Error: No files specified to %s.\n", mode_create? "create archive with": "add to archive");
 			usage ();
 			return 1;
 		}

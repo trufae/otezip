@@ -6,8 +6,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../include/zstream.h"
-#include "otezip.h" /* for read/write little-endian helpers */
+#include "otezip/zstream.h"
+#include "otezip/zip.h" /* for read/write little-endian helpers */
 
 typedef struct {
 	int quality;

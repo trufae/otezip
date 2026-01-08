@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-- Source: `src/lib/otezip.c`, `src/main.c`, headers in `src/include/otezip.h`, config in `src/include/config.h`.
+- Source: `src/lib/otezip.c`, `src/main.c`, headers in `src/include/otezip/zip.h`, config in `src/include/otezip/config.h`.
 - Algorithms: minimalistic, but fully functional implementations for every compression algorithm `src/lib/*.inc.c` (deflate, lzma, brotli, zstd, lzfse).
 - Tests: integration script `test/test.sh` and unit tests in `test/unit/`. Sample assets in `test/` (e.g., `test.zip`, sample files).
 

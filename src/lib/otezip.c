@@ -16,8 +16,8 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "otezip.h"
-#include "../include/zstream.h"
+#include "otezip/zip.h"
+#include "otezip/zstream.h"
 #include "time.inc.c"
 
 #if defined(_WIN32) || defined(_WIN64)

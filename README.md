@@ -33,7 +33,7 @@ make -C test
 ### Library API
 
 ```c
-#include "otezip.h"
+#include "otezip/zip.h"
 
 // Open ZIP file
 zip_t *za = zip_open("archive.zip", ZIP_RDONLY, &err);

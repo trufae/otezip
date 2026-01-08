@@ -14,7 +14,7 @@ libotezip.a: src/lib/otezip.o
 	$(AR) rc $@ $(OTEZIP_OBJS)
 	$(RANLIB) $@
 
-otezip: src/main.c src/lib/otezip.c src/include/otezip.h src/include/config.h
+otezip: src/main.c src/lib/otezip.c src/include/otezip/zip.h src/include/otezip/config.h
 	$(CC) $(CFLAGS) -I src/include -o otezip src/main.c src/lib/otezip.c
 
 mall:
@@ -45,7 +45,7 @@ clean:
 	rm -rf build otezip libotezip.a $(OTEZIP_OBJS)
 
 # Object file build rules
-src/lib/otezip.o: src/lib/otezip.c src/include/otezip.h src/include/config.h
+src/lib/otezip.o: src/lib/otezip.c src/include/otezip/zip.h src/include/otezip/config.h
 	$(CC) $(CFLAGS) -I src/include -c src/lib/otezip.c -o $@
 
 fmt indent:
