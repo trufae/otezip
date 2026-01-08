@@ -163,7 +163,7 @@ typedef struct otezip_error     zip_error_t; /* error structure              */
 #define ZIP_STAT_COMP_METHOD 0x0040u
 
 /* zip_stat structure */
-struct otezip_stat {
+struct zip_stat {
     zip_uint64_t valid;        /* which fields have valid values */
     const char *name;          /* name of the file */
     zip_uint64_t index;        /* index within archive */
@@ -174,7 +174,7 @@ struct otezip_stat {
     zip_uint16_t comp_method;  /* compression method used */
 };
 
-typedef struct otezip_stat zip_stat_t;
+typedef struct zip_stat zip_stat_t;
 
 /* ----------------------------  public API  ----------------------------- */
 
