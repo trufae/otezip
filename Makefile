@@ -3,8 +3,16 @@ CFLAGS?=-O2 -Wall -Wextra -std=c99
 DESTDIR?=
 PREFIX?=/usr/local
 BINDIR?=$(PREFIX)/bin
+AR?=ar
+RANLIB?=ranlib
+
+OTEZIP_OBJS=src/lib/otezip.o
 
 all: otezip
+
+libotezip.a: src/lib/otezip.o
+	$(AR) rc $@ $(OTEZIP_OBJS)
+	$(RANLIB) $@
 
 otezip: src/main.c src/lib/otezip.c src/include/otezip.h src/include/config.h
 	$(CC) $(CFLAGS) -I src/include -o otezip src/main.c src/lib/otezip.c
@@ -34,7 +42,11 @@ test2:
 	rm -rf build
 
 clean:
-	rm -rf build otezip
+	rm -rf build otezip libotezip.a $(OTEZIP_OBJS)
+
+# Object file build rules
+src/lib/otezip.o: src/lib/otezip.c src/include/otezip.h src/include/config.h
+	$(CC) $(CFLAGS) -I src/include -c src/lib/otezip.c -o $@
 
 fmt indent:
 	find . -name "*.c" -exec clang-format-radare2 -i {} \;
