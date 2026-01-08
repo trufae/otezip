@@ -16,7 +16,27 @@
 #include <fcntl.h>
 #include <time.h>
 #include <sys/stat.h>
+
+#if defined(_WIN32) || defined(_WIN64)
+#include <io.h>
+#include <direct.h>
+#define unlink _unlink
+#define close _close
+#define write _write
+#define creat _creat
+#ifndef ssize_t
+#define ssize_t int
+#endif
+static int mkstemp(char *template) {
+	if (_mktemp_s (template, strlen (template) + 1) != 0) {
+		return -1;
+	}
+	return _open (template, _O_CREAT | _O_EXCL | _O_RDWR | _O_BINARY, _S_IREAD | _S_IWRITE);
+}
+#else
 #include <unistd.h>
+#endif
+
 #include "../include/otezip/zip.h"
 #include "../include/otezip/zstream.h"
 #include "time.inc.c"
