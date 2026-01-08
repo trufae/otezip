@@ -11,8 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include "otezip/config.h"
-#include "otezip/zip.h"
+#include "include/otezip/config.h"
+#include "include/otezip/zip.h"
 
 #include <limits.h>
 #include <sys/stat.h>
