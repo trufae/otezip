@@ -5,8 +5,7 @@
 
 /* Include LZMA implementation */
 #define OTEZIP_ENABLE_LZMA
-#include "../../src/include/zstream.h"
-#include "../../src/lib/lzma.inc.c" /* This will include both encoder and decoder */
+#include "../../src/lib/lzma.inc.c"
 
 /* Simple test to compress and decompress data using LZMA */
 int test_lzma_compress_decompress() {
@@ -187,6 +186,9 @@ int test_lzma_large_data() {
 }
 
 int main(int argc, char *argv[]) {
+	(void)argc;
+	(void)argv;
+
 	printf ("Running LZMA basic test...\n");
 	int result1 = test_lzma_compress_decompress ();
 
