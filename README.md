@@ -1,8 +1,8 @@
-# OpTimizEd ZIP libzip compatible (otezip)
+# An OTEr ZIP library (libzip compatible)
 
 [![CI](https://github.com/trufae/otezip/actions/workflows/ci.yml/badge.svg)](https://github.com/trufae/otezip/actions/workflows/ci.yml)
 
-A minimalistic, dependency-free ZIP implementation with support for multiple compression algorithms.
+A minimalistic ZIP implementation in plain C with support for multiple compression algorithms.
 
 ## Features
 

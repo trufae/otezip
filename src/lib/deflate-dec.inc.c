@@ -1,5 +1,13 @@
 /* ----------- Decoder-specific data structures ----------- */
 
+/* Wrapper format types */
+typedef enum {
+	WRAP_NONE = 0,   /* Raw deflate */
+	WRAP_ZLIB = 1,   /* zlib header */
+	WRAP_GZIP = 2,   /* gzip header */
+	WRAP_AUTO = 3    /* Auto-detect zlib or gzip */
+} wrap_format;
+
 /* Internal state for inflate */
 typedef struct {
 	/* Input state */
@@ -19,6 +27,15 @@ typedef struct {
 	uint8_t *window; /* Sliding window for LZ77 */
 	uint32_t window_size; /* Size of window */
 	uint32_t window_pos; /* Current position in window */
+
+	/* Wrapper handling */
+	wrap_format wrap; /* Wrapper format */
+	int header_done; /* Has header been processed? */
+
+	/* Pending copy state (for resuming after Z_BUF_ERROR) */
+	int pending_copy; /* Non-zero if there's a pending copy operation */
+	int pending_length; /* Remaining bytes to copy */
+	int pending_distance; /* Distance for the copy */
 } inflate_state;
 
 /* Get a bit from the input stream */
@@ -331,6 +348,98 @@ static void init_fixed_huffman(inflate_state *state) {
 
 /* ----------- Main decoder API functions ----------- */
 
+/* Gzip header flags */
+#define GZIP_FTEXT    0x01
+#define GZIP_FHCRC    0x02
+#define GZIP_FEXTRA   0x04
+#define GZIP_FNAME    0x08
+#define GZIP_FCOMMENT 0x10
+
+/* Skip gzip header, returns bytes consumed or -1 on error */
+static int skip_gzip_header(const uint8_t *buf, size_t len) {
+	if (len < 10) {
+		return -1; /* Need at least 10 bytes for minimal gzip header */
+	}
+	/* Check magic bytes */
+	if (buf[0] != 0x1f || buf[1] != 0x8b) {
+		return -1; /* Not gzip */
+	}
+	/* Check compression method (must be deflate = 8) */
+	if (buf[2] != 8) {
+		return -1;
+	}
+	uint8_t flags = buf[3];
+	/* Skip: flags(1), mtime(4), xfl(1), os(1) = 7 bytes after magic+method */
+	size_t pos = 10;
+
+	/* Skip extra field if present */
+	if (flags & GZIP_FEXTRA) {
+		if (pos + 2 > len) {
+			return -1;
+		}
+		uint16_t xlen = buf[pos] | (buf[pos + 1] << 8);
+		pos += 2 + xlen;
+		if (pos > len) {
+			return -1;
+		}
+	}
+	/* Skip original filename if present */
+	if (flags & GZIP_FNAME) {
+		while (pos < len && buf[pos] != 0) {
+			pos++;
+		}
+		if (pos >= len) {
+			return -1;
+		}
+		pos++; /* Skip the null terminator */
+	}
+	/* Skip comment if present */
+	if (flags & GZIP_FCOMMENT) {
+		while (pos < len && buf[pos] != 0) {
+			pos++;
+		}
+		if (pos >= len) {
+			return -1;
+		}
+		pos++; /* Skip the null terminator */
+	}
+	/* Skip header CRC if present */
+	if (flags & GZIP_FHCRC) {
+		pos += 2;
+		if (pos > len) {
+			return -1;
+		}
+	}
+	return (int)pos;
+}
+
+/* Skip zlib header, returns bytes consumed or -1 on error */
+static int skip_zlib_header(const uint8_t *buf, size_t len) {
+	if (len < 2) {
+		return -1;
+	}
+	/* Check CMF and FLG */
+	uint8_t cmf = buf[0];
+	uint8_t flg = buf[1];
+	/* Check method (must be deflate = 8) */
+	if ((cmf & 0x0f) != 8) {
+		return -1;
+	}
+	/* Check header checksum */
+	if ((cmf * 256 + flg) % 31 != 0) {
+		return -1;
+	}
+	size_t pos = 2;
+	/* Skip preset dictionary if present */
+	if (flg & 0x20) {
+		pos += 4;
+		if (pos > len) {
+			return -1;
+		}
+	}
+	return (int)pos;
+}
+
 /* Compatibility wrapper for zlib */
 int inflateInit2_(z_stream *strm, int windowBits, const char *version, int stream_size) {
 	(void)version; /* Unused */
@@ -342,8 +451,35 @@ int inflateInit2(z_stream *strm, int windowBits) {
 	if (!strm) {
 		return Z_STREAM_ERROR;
 	}
-	/* Handle windowBits - negative means no header */
-	int window_size = 1 << ((windowBits < 0)? -windowBits: windowBits);
+
+	/* Determine wrapper format from windowBits:
+	 * windowBits < 0: raw deflate (no header)
+	 * windowBits 8-15: zlib header
+	 * windowBits 24-31 (+16): gzip header
+	 * windowBits 40-47 (+32): auto-detect zlib or gzip
+	 */
+	wrap_format wrap = WRAP_NONE;
+	int actual_bits = windowBits;
+	if (windowBits < 0) {
+		wrap = WRAP_NONE;
+		actual_bits = -windowBits;
+	} else if (windowBits >= 40) {
+		wrap = WRAP_AUTO;
+		actual_bits = windowBits - 32;
+	} else if (windowBits >= 24) {
+		wrap = WRAP_GZIP;
+		actual_bits = windowBits - 16;
+	} else {
+		wrap = WRAP_ZLIB;
+		actual_bits = windowBits;
+	}
+	if (actual_bits < 8) {
+		actual_bits = 8;
+	}
+	if (actual_bits > 15) {
+		actual_bits = 15;
+	}
+	int window_size = 1 << actual_bits;
 
 	/* Allocate state */
 	inflate_state *state = (inflate_state *)calloc (1, sizeof (inflate_state));
@@ -365,11 +501,43 @@ int inflateInit2(z_stream *strm, int windowBits) {
 	state->bits_in_buffer = 0;
 	state->final_block = 0;
 	state->state = 0; /* Start at block header */
+	state->wrap = wrap;
+	state->header_done = 0;
+	state->pending_copy = 0;
+	state->pending_length = 0;
+	state->pending_distance = 0;
 
 	strm->state = state;
 	strm->total_in = 0;
 	strm->total_out = 0;
 
+	return Z_OK;
+}
+
+/* Helper to copy bytes from sliding window - handles partial copies */
+static int do_copy_from_window(z_stream *strm, inflate_state *state, int length, int distance) {
+	/* Copy as many bytes as we can */
+	while (length > 0 && strm->avail_out > 0) {
+		uint8_t byte = state->window[(state->window_pos - distance) & (state->window_size - 1)];
+		*strm->next_out++ = byte;
+		strm->avail_out--;
+		strm->total_out++;
+
+		/* Add to window */
+		state->window[state->window_pos] = byte;
+		state->window_pos = (state->window_pos + 1) & (state->window_size - 1);
+		length--;
+	}
+
+	if (length > 0) {
+		/* Couldn't complete the copy - save state */
+		state->pending_copy = 1;
+		state->pending_length = length;
+		state->pending_distance = distance;
+		return Z_BUF_ERROR;
+	}
+
+	state->pending_copy = 0;
 	return Z_OK;
 }
 
@@ -379,6 +547,46 @@ int inflate(z_stream *strm, int flush) {
 	}
 	inflate_state *state = (inflate_state *)strm->state;
 	int ret = Z_OK;
+
+	/* Handle wrapper header if not yet processed */
+	if (!state->header_done && state->wrap != WRAP_NONE) {
+		int skip = 0;
+		if (state->wrap == WRAP_GZIP) {
+			skip = skip_gzip_header (strm->next_in, strm->avail_in);
+			if (skip < 0) {
+				return Z_DATA_ERROR;
+			}
+		} else if (state->wrap == WRAP_ZLIB) {
+			skip = skip_zlib_header (strm->next_in, strm->avail_in);
+			if (skip < 0) {
+				return Z_DATA_ERROR;
+			}
+		} else if (state->wrap == WRAP_AUTO) {
+			/* Auto-detect: try gzip first, then zlib */
+			if (strm->avail_in >= 2 && strm->next_in[0] == 0x1f && strm->next_in[1] == 0x8b) {
+				skip = skip_gzip_header (strm->next_in, strm->avail_in);
+			} else {
+				skip = skip_zlib_header (strm->next_in, strm->avail_in);
+			}
+			if (skip < 0) {
+				return Z_DATA_ERROR;
+			}
+		}
+		if (skip > 0) {
+			strm->next_in += skip;
+			strm->avail_in -= skip;
+			strm->total_in += skip;
+		}
+		state->header_done = 1;
+	}
+
+	/* Resume any pending copy operation first */
+	if (state->pending_copy) {
+		ret = do_copy_from_window (strm, state, state->pending_length, state->pending_distance);
+		if (ret != Z_OK) {
+			return ret;
+		}
+	}
 
 	/* Main decompression loop - continue even when avail_out is 0
 	 * to check for end-of-block marker */
@@ -560,21 +768,10 @@ int inflate(z_stream *strm, int flush) {
 						return Z_DATA_ERROR; /* Distance too far back */
 					}
 
-					/* Make sure we have enough output space */
-					if (strm->avail_out < (uint32_t)length) {
-						return Z_BUF_ERROR;
-					}
-
-					/* Copy the bytes */
-					for (int i = 0; i < length; i++) {
-						uint8_t byte = state->window[(state->window_pos - distance) &(state->window_size - 1)];
-						*strm->next_out++ = byte;
-						strm->avail_out--;
-						strm->total_out++;
-
-						/* Add to window */
-						state->window[state->window_pos] = byte;
-						state->window_pos = (state->window_pos + 1) &(state->window_size - 1);
+					/* Copy bytes using helper (handles partial copies) */
+					ret = do_copy_from_window (strm, state, length, distance);
+					if (ret != Z_OK) {
+						return ret;
 					}
 				} else {
 					/* Invalid code */
