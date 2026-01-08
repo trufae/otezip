@@ -1240,6 +1240,7 @@ zip_file_t *zip_fopen_index(zip_t *za, zip_uint64_t index, zip_flags_t flags) {
 	}
 	zf->data = buf;
 	zf->size = sz;
+	zf->pos = 0;
 	return zf;
 }
 
@@ -1250,6 +1251,100 @@ int zip_fclose(zip_file_t *zf) {
 	free (zf->data);
 	free (zf);
 	return 0;
+}
+
+zip_int64_t zip_fread(zip_file_t *zf, void *buf, zip_uint64_t nbytes) {
+	if (!zf || !buf) {
+		return -1;
+	}
+	if (zf->pos >= zf->size) {
+		return 0;
+	}
+	zip_uint64_t remaining = zf->size - zf->pos;
+	zip_uint64_t to_copy = (nbytes < remaining) ? nbytes : remaining;
+	memcpy (buf, (uint8_t *)zf->data + zf->pos, to_copy);
+	zf->pos += to_copy;
+	return (zip_int64_t)to_copy;
+}
+
+void zip_stat_init(zip_stat_t *st) {
+	if (!st) {
+		return;
+	}
+	st->valid = 0;
+	st->name = NULL;
+	st->index = ZIP_UINT64_MAX;
+	st->size = 0;
+	st->comp_size = 0;
+	st->mtime = (time_t)-1;
+	st->crc = 0;
+	st->comp_method = ZIP_CM_STORE;
+}
+
+int zip_stat_index(zip_t *za, zip_uint64_t index, zip_flags_t flags, zip_stat_t *st) {
+	(void)flags;
+	if (!za || !st || index >= za->n_entries) {
+		return -1;
+	}
+	zip_stat_init (st);
+	struct otezip_entry *e = &za->entries[index];
+	st->name = e->name;
+	st->index = index;
+	st->size = e->uncomp_size;
+	st->comp_size = e->comp_size;
+	st->crc = e->crc32;
+	st->comp_method = e->method;
+	st->valid = ZIP_STAT_NAME | ZIP_STAT_INDEX | ZIP_STAT_SIZE | ZIP_STAT_COMP_SIZE | ZIP_STAT_CRC | ZIP_STAT_COMP_METHOD;
+	return 0;
+}
+
+const char *zip_get_name(zip_t *za, zip_uint64_t index, zip_flags_t flags) {
+	(void)flags;
+	if (!za || index >= za->n_entries) {
+		return NULL;
+	}
+	return za->entries[index].name;
+}
+
+int zip_stat(zip_t *za, const char *fname, zip_flags_t flags, zip_stat_t *st) {
+	zip_int64_t index = zip_name_locate (za, fname, flags);
+	if (index < 0) {
+		return -1;
+	}
+	return zip_stat_index (za, (zip_uint64_t)index, flags, st);
+}
+
+zip_t *zip_open_from_source(zip_source_t *src, int flags, zip_error_t *error) {
+	(void)error;
+	if (!src) {
+		return NULL;
+	}
+	/* Since otezip's zip_source_t is a simple buffer wrapper,
+	 * we create a temporary file and write the buffer to it,
+	 * then open the archive normally. */
+	char tmp_path[] = "/tmp/otezip_XXXXXX";
+	int fd = mkstemp (tmp_path);
+	if (fd < 0) {
+		return NULL;
+	}
+	/* Write the source buffer to the temp file */
+	ssize_t written = write (fd, src->buf, src->len);
+	close (fd);
+	if (written != (ssize_t)src->len) {
+		unlink (tmp_path);
+		return NULL;
+	}
+	/* Open the archive from the temp file */
+	int errorp = 0;
+	zip_t *za = zip_open (tmp_path, flags, &errorp);
+	if (!za) {
+		unlink (tmp_path);
+		return NULL;
+	}
+	/* Note: The temp file will be cleaned up when the archive is closed.
+	 * This is a simple implementation; a more sophisticated one would
+	 * handle in-memory sources directly. */
+	return za;
 }
 
 /* Helper function to write local file header */
@@ -1413,4 +1508,74 @@ zip_source_t *zip_source_buffer(zip_t *za, const void *data, zip_uint64_t len, i
 	src->len = len;
 	src->freep = freep;
 	return src;
+}
+
+zip_source_t *zip_source_buffer_create(const void *data, zip_uint64_t len, int freep, zip_error_t *error) {
+	(void)error;
+	return zip_source_buffer (NULL, data, len, freep);
+}
+
+void zip_source_free(zip_source_t *src) {
+	if (!src) {
+		return;
+	}
+	if (src->freep && src->buf) {
+		free ((void *)src->buf);
+	}
+	free (src);
+}
+
+/* Helper to replace entry data at an existing index */
+static int otezip_replace_entry_data(zip_t *za, zip_uint64_t index, zip_source_t *src) {
+	if (!za || index >= za->n_entries || !src) {
+		return -1;
+	}
+	if (za->mode != 1) {
+		return -1;
+	}
+	struct otezip_entry *e = &za->entries[index];
+	/* Free old data if present */
+	free ((void *)src->buf);
+	/* Update entry with new source data */
+	e->uncomp_size = (uint32_t)src->len;
+	e->crc32 = otezip_crc32 (0, src->buf, src->len);
+	/* Compress the data using the selected method */
+	uint8_t *comp_buf = NULL;
+	uint32_t comp_size = 0;
+	if (otezip_compress_data ((uint8_t *)src->buf, src->len, &comp_buf, &comp_size, &e->method) != 0) {
+		return -1;
+	}
+	if ((uint64_t)comp_size > MZIP_MAX_PAYLOAD) {
+		free (comp_buf);
+		return -1;
+	}
+	e->comp_size = comp_size;
+	/* Write the updated entry */
+	long current_pos = ftell (za->fp);
+	if (current_pos < 0) {
+		free (comp_buf);
+		return -1;
+	}
+	e->local_hdr_ofs = (uint32_t)current_pos;
+	otezip_write_local_header (za->fp, e->name, e->method, e->comp_size, e->uncomp_size, e->crc32);
+	fwrite (comp_buf, 1, comp_size, za->fp);
+	free (comp_buf);
+	return 0;
+}
+
+int zip_file_replace(zip_t *za, zip_uint64_t index, zip_source_t *src, zip_flags_t flags) {
+	(void)flags;
+	if (otezip_replace_entry_data (za, index, src) != 0) {
+		return -1;
+	}
+	return 0;
+}
+
+/* Deprecated functions - just forward to the new API */
+int zip_replace(zip_t *za, zip_uint64_t index, zip_source_t *src) {
+	return zip_file_replace (za, index, src, 0);
+}
+
+zip_int64_t zip_add(zip_t *za, const char *name, zip_source_t *src) {
+	return zip_file_add (za, name, src, 0);
 }

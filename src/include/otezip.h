@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "config.h"
 
@@ -69,6 +70,8 @@ typedef int64_t  zip_int64_t;
 typedef int      zip_flags_t;    /* we don't interpret any flags for now */
 typedef int32_t  zip_int32_t;
 typedef uint32_t zip_uint32_t;
+typedef uint16_t zip_uint16_t;
+typedef uint8_t  zip_uint8_t;
 
 /* an in-memory representation of a single directory entry */
 struct otezip_entry {
@@ -95,17 +98,25 @@ struct otezip_archive {
 struct otezip_file {
     uint8_t   *data;   /* complete uncompressed data                 */
     uint32_t   size;
+    zip_uint64_t pos;  /* current read position for zip_fread       */
 };
 
-struct otezip_src_buf { 
+struct otezip_src_buf {
     const void *buf;
     zip_uint64_t len;
     int freep;
 };
 
+/* Error information structure */
+struct otezip_error {
+    int zip_err;   /* libzip error code (ZIP_ER_*) */
+    int sys_err;   /* copy of errno (E*) or zlib error code */
+};
+
 typedef struct otezip_archive   zip_t;      /* opaque archive handle        */
 typedef struct otezip_file      zip_file_t; /* opaque file-in-memory handle */
 typedef struct otezip_src_buf   zip_source_t;/* stub                          */
+typedef struct otezip_error     zip_error_t; /* error structure              */
 
 /* Only flag we meaningfully accept at the moment. */
 #ifndef ZIP_RDONLY
@@ -124,6 +135,44 @@ typedef struct otezip_src_buf   zip_source_t;/* stub                          */
 #define ZIP_TRUNCATE 8
 #endif
 
+/* Compression methods */
+#define ZIP_CM_STORE 0    /* stored (uncompressed) */
+#define ZIP_CM_DEFLATE 8  /* deflated */
+
+/* Maximum value for zip_uint64_t */
+#define ZIP_UINT64_MAX ((zip_uint64_t)-1)
+
+/* libzip error codes */
+#define ZIP_ER_OK 0               /* No error */
+#define ZIP_ER_INVAL 18           /* Invalid argument */
+#define ZIP_ER_NOENT 9            /* No such file */
+#define ZIP_ER_EXISTS 10          /* File already exists */
+#define ZIP_ER_NOZIP 19           /* Not a zip archive */
+#define ZIP_ER_RDONLY 25          /* Read-only archive */
+
+/* zip_stat flags */
+#define ZIP_STAT_NAME 0x0001u
+#define ZIP_STAT_INDEX 0x0002u
+#define ZIP_STAT_SIZE 0x0004u
+#define ZIP_STAT_COMP_SIZE 0x0008u
+#define ZIP_STAT_MTIME 0x0010u
+#define ZIP_STAT_CRC 0x0020u
+#define ZIP_STAT_COMP_METHOD 0x0040u
+
+/* zip_stat structure */
+struct otezip_stat {
+    zip_uint64_t valid;        /* which fields have valid values */
+    const char *name;          /* name of the file */
+    zip_uint64_t index;        /* index within archive */
+    zip_uint64_t size;         /* size of file (uncompressed) */
+    zip_uint64_t comp_size;    /* size of file (compressed) */
+    time_t mtime;              /* modification time */
+    zip_uint32_t crc;          /* crc of file data */
+    zip_uint16_t comp_method;  /* compression method used */
+};
+
+typedef struct otezip_stat zip_stat_t;
+
 /* ----------------------------  public API  ----------------------------- */
 
 #ifdef __cplusplus
@@ -131,17 +180,29 @@ extern "C" {
 #endif
 
 zip_t *        zip_open          (const char *path, int flags, int *errorp);
+zip_t *        zip_open_from_source(zip_source_t *src, int flags, zip_error_t *error);
 int            zip_close         (zip_t *za);
 
 zip_uint64_t   zip_get_num_files (zip_t *za);
 zip_int64_t    zip_name_locate   (zip_t *za, const char *fname, zip_flags_t flags);
+const char *   zip_get_name      (zip_t *za, zip_uint64_t index, zip_flags_t flags);
 
 zip_file_t *   zip_fopen_index   (zip_t *za, zip_uint64_t index, zip_flags_t flags);
 int            zip_fclose        (zip_file_t *zf);
+zip_int64_t    zip_fread         (zip_file_t *zf, void *buf, zip_uint64_t nbytes);
 
 zip_source_t * zip_source_buffer (zip_t *za, const void *data, zip_uint64_t len, int freep);
+zip_source_t * zip_source_buffer_create(const void *data, zip_uint64_t len, int freep, zip_error_t *error);
+void           zip_source_free   (zip_source_t *src);
 zip_int64_t    zip_file_add      (zip_t *za, const char *name, zip_source_t *src, zip_flags_t flags);
+int            zip_file_replace  (zip_t *za, zip_uint64_t index, zip_source_t *src, zip_flags_t flags);
+int            zip_replace       (zip_t *za, zip_uint64_t index, zip_source_t *src);
+zip_int64_t    zip_add           (zip_t *za, const char *name, zip_source_t *src);
 int            zip_set_file_compression(zip_t *za, zip_uint64_t index, zip_int32_t comp, zip_uint32_t comp_flags);
+
+int            zip_stat          (zip_t *za, const char *fname, zip_flags_t flags, zip_stat_t *st);
+int            zip_stat_index    (zip_t *za, zip_uint64_t index, zip_flags_t flags, zip_stat_t *st);
+void           zip_stat_init     (zip_stat_t *st);
 
 #ifdef __cplusplus
 } /* extern "C" */
@@ -162,13 +223,5 @@ extern int otezip_ignore_zipbomb;
 /* Helper function to get compression method ID from string name.
  * Returns the OTEZIP_METHOD_* value or -1 if invalid/not supported. */
 int otezip_method_from_string(const char *method_name);
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* OTEZIP_H_ */
