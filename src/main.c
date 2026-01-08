@@ -814,8 +814,7 @@ int main(int argc, char **argv) {
 			/* Remove .gz extension if present, else add .out */
 			size_t len = strlen (input_path);
 			if (len > 3 && strcmp (input_path + len - 3, ".gz") == 0) {
-				strncpy (output_path, input_path, len - 3);
-				output_path[len - 3] = '\0';
+				snprintf (output_path, sizeof (output_path), "%.*s", (int)(len - 3), input_path);
 			} else {
 				snprintf (output_path, sizeof (output_path), "%s.out", input_path);
 			}
