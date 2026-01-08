@@ -3,7 +3,7 @@ project('otezip', 'c',
   default_options : ['c_std=c99', 'warning_level=2'])
 
 otezip_src = files('src/lib/otezip.c')
-otezip_inc = include_directories('src/include')
+otezip_inc = include_directories('src/include/otezip')
 
 otezip_lib = static_library('otezip',
   otezip_src,
