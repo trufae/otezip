@@ -4,13 +4,14 @@ DESTDIR?=
 PREFIX?=/usr/local
 BINDIR?=$(PREFIX)/bin
 AR?=ar
+EXT_AR?=a
 RANLIB?=ranlib
 
 OTEZIP_OBJS=src/lib/otezip.o
 
-all: otezip libotezip.a
+all: otezip libotezip.$(EXT_AR)
 
-libotezip.a: src/lib/otezip.o
+libotezip.$(EXT_AR): src/lib/otezip.o
 	$(AR) rc $@ $(OTEZIP_OBJS)
 	$(RANLIB) $@
 
@@ -44,10 +45,10 @@ test2:
 asan: clean
 	meson build -Db_sanitize=address && ninja -C build
 	cp -f build/otezip ./otezip
-	cp -f build/libotezip.a ./libotezip.a
+	cp -f build/libotezip.$(EXT_AR) ./libotezip.$(EXT_AR)
 
 clean:
-	rm -rf build otezip libotezip.a $(OTEZIP_OBJS)
+	rm -rf build otezip libotezip.$(EXT_AR) $(OTEZIP_OBJS)
 
 # Object file build rules
 src/lib/otezip.o: src/lib/otezip.c src/include/otezip/zip.h src/include/otezip/config.h
