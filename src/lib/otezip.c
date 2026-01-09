@@ -6,7 +6,6 @@
  * License: MIT / 0-BSD – do whatever you want; attribution appreciated.
  */
 
-#define _POSIX_C_SOURCE 200809L
 #define _GNU_SOURCE
 #define OTEZIP_IMPLEMENTATION
 
@@ -33,6 +32,19 @@ static int otezip_mkstemp(char *template) {
 		return -1;
 	}
 	return _open (template, _O_CREAT | _O_EXCL | _O_RDWR | _O_BINARY, _S_IREAD | _S_IWRITE);
+}
+#elif defined(__wasi__)
+#include <unistd.h>
+static int otezip_mkstemp(const char *prefix) {
+	char path[64];
+	for (int i = 0; i < 10000; i++) {
+		snprintf (path, sizeof (path), "%s_%d.tmp", prefix, i);
+		int fd = open (path, O_RDWR | O_CREAT | O_EXCL, 0600);
+		if (fd >= 0) {
+			return fd; // success
+		}
+	}
+	return -1;
 }
 #else
 #include <unistd.h>
