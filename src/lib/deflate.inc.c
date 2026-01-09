@@ -68,15 +68,11 @@
 
 /* ------------- Data Structures ------------- */
 
-/* zlib-like basic typedefs used by callers */
-typedef unsigned long uLong;
-typedef unsigned int uInt;
-
 /* Conservative upper bound for deflate output size, zlib-compatible API */
-static inline uLong compressBound(uLong sourceLen) {
+static inline unsigned long compressBound(unsigned long sourceLen) {
 	/* Conservative bound: input + 1/8 + fixed overhead */
-	uLong extra = (sourceLen >> 3) + 64u;
-	uLong bound = sourceLen + extra + 11u;
+	unsigned long extra = (sourceLen >> 3) + 64u;
+	unsigned long bound = sourceLen + extra + 11u;
 	return (bound < sourceLen)? sourceLen: bound;
 }
 

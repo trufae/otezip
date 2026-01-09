@@ -771,7 +771,7 @@ static int otezip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_b
 #ifdef OTEZIP_ENABLE_DEFLATE
 	if (*method == OTEZIP_METHOD_DEFLATE) {
 		/* Deflate compression */
-		uLong comp_bound = compressBound (in_size);
+		unsigned long comp_bound = compressBound (in_size);
 		*out_buf = (uint8_t *)malloc (comp_bound);
 		if (!*out_buf) {
 			return -1;
@@ -825,9 +825,9 @@ static int otezip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_b
 		}
 
 		strm.next_in = in_buf;
-		strm.avail_in = (uInt)in_size;
+		strm.avail_in = (unsigned int)in_size;
 		strm.next_out = *out_buf;
-		strm.avail_out = (uInt)out_cap;
+		strm.avail_out = (unsigned int)out_cap;
 
 		/* Keep calling compress until all data is processed and we get Z_STREAM_END */
 		int ret = Z_OK;
@@ -896,9 +896,9 @@ static int otezip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_b
 		}
 
 		strm.next_in = in_buf;
-		strm.avail_in = (uInt)in_size;
+		strm.avail_in = (unsigned int)in_size;
 		strm.next_out = *out_buf;
-		strm.avail_out = (uInt)out_cap;
+		strm.avail_out = (unsigned int)out_cap;
 
 		int ret = lzfseCompress (&strm, Z_FINISH);
 		if (ret != Z_STREAM_END) {
@@ -941,7 +941,7 @@ static int otezip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_b
 		strm.next_in = in_buf;
 		strm.avail_in = in_size;
 		strm.next_out = *out_buf;
-		strm.avail_out = (uInt)out_cap;
+		strm.avail_out = (unsigned int)out_cap;
 
 		int ret = lzmaCompress (&strm, Z_FINISH);
 		if (ret != Z_STREAM_END) {
@@ -983,9 +983,9 @@ static int otezip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_b
 		}
 
 		strm.next_in = in_buf;
-		strm.avail_in = (uInt)in_size;
+		strm.avail_in = (unsigned int)in_size;
 		strm.next_out = *out_buf;
-		strm.avail_out = (uInt)out_cap;
+		strm.avail_out = (unsigned int)out_cap;
 
 		int ret = brotliCompress (&strm, Z_FINISH);
 		if (ret != Z_STREAM_END) {
@@ -1002,7 +1002,7 @@ static int otezip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_b
 				}
 				*out_buf = nb;
 				strm.next_out = *out_buf + used;
-				strm.avail_out = (uInt) (out_cap - used);
+				strm.avail_out = (unsigned int) (out_cap - used);
 				ret = brotliCompress (&strm, Z_FINISH);
 			}
 		}
