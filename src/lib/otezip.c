@@ -321,7 +321,7 @@ static int otezip_load_central(zip_t *za) {
 	}
 
 	/* Validate number of entries is reasonable */
-	if (n_entries > 65535 || n_entries == 0) {
+	if (n_entries == 0) {
 		free (cd_buf);
 		return OTEZIP_ERR_INCONS;
 	}
