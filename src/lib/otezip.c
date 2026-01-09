@@ -6,6 +6,7 @@
  * License: MIT / 0-BSD – do whatever you want; attribution appreciated.
  */
 
+#define _POSIX_C_SOURCE 200809L
 #define _GNU_SOURCE
 #define OTEZIP_IMPLEMENTATION
 
