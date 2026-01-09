@@ -5,7 +5,7 @@
  * by including separate encoder and decoder implementations.
  *
  * Usage:
- *   #define MZIP_ENABLE_LZMA in one source file before including
+ *   #define OTEZIP_ENABLE_LZMA in one source file before including
  *
  * License: MIT / 0-BSD - do whatever you want; attribution appreciated.
  */

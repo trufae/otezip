@@ -7,7 +7,7 @@
  * 3. Verifying the results match the original
  *
  * Compile with:
- *   cc -DMZIP_ENABLE_BROTLI -DMBROTLI_IMPLEMENTATION test_brotli.c -o test_brotli
+ *   cc -DOTEZIP_ENABLE_BROTLI -DMBROTLI_IMPLEMENTATION test_brotli.c -o test_brotli
  *
  * License: MIT
  */

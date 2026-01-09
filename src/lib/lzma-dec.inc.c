@@ -342,5 +342,5 @@ int lzmaDecompressInit2_(z_stream *strm, int windowBits,
 	return lzmaDecompressInit2 (strm, windowBits);
 }
 
-#endif /* MZIP_ENABLE_LZMA */
+#endif /* OTEZIP_ENABLE_LZMA */
 #endif /* MLZMA_DEC_H */

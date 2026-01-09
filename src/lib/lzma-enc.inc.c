@@ -347,5 +347,5 @@ int lzmaCompressInit2_(z_stream *strm, int level, int windowBits,
 	return lzmaCompressInit2 (strm, level, windowBits, memLevel, strategy);
 }
 
-#endif /* MZIP_ENABLE_LZMA */
+#endif /* OTEZIP_ENABLE_LZMA */
 #endif /* MLZMA_ENC_H */

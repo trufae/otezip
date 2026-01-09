@@ -72,16 +72,16 @@ static int otezip_mkstemp(char *template) {
 #endif
 
 /* Local/central directory signatures */
-#define MZIP_SIG_LFH 0x04034b50u
-#define MZIP_SIG_CDH 0x02014b50u
-#define MZIP_SIG_EOCD 0x06054b50u
+#define OTEZIP_SIG_LFH 0x04034b50u
+#define OTEZIP_SIG_CDH 0x02014b50u
+#define OTEZIP_SIG_EOCD 0x06054b50u
 
 /* Safety limits for parsing ZIP fields to avoid integer overflows and
  * excessive allocations. These limits apply to filename/extra/comment
  * fields and to compressed/uncompressed sizes used by this library.
  */
-#define MZIP_MAX_FIELD_LEN (64u * 1024u - 1u) /* 64 KiB - 1 to fit 16-bit lengths (65535) */
-#define MZIP_MAX_PAYLOAD (2ULL * 1024ULL * 1024ULL * 1024ULL) /* 2 GiB */
+#define OTEZIP_MAX_FIELD_LEN (64u * 1024u - 1u) /* 64 KiB - 1 to fit 16-bit lengths (65535) */
+#define OTEZIP_MAX_PAYLOAD (2ULL * 1024ULL * 1024ULL * 1024ULL) /* 2 GiB */
 
 /* Forward declarations of helper functions */
 static uint32_t otezip_write_local_header(FILE *fp, const char *name, uint32_t comp_method,
@@ -206,7 +206,7 @@ static long otezip_find_eocd(FILE *fp, uint8_t *eocd_out /*22+*/, size_t *cd_siz
 	}
 	size_t i;
 	for (i = search_len - 22; i != (size_t)-1; --i) {
-		if (otezip_rd32 (buf + i) == MZIP_SIG_EOCD) {
+		if (otezip_rd32 (buf + i) == OTEZIP_SIG_EOCD) {
 			/* Basic EOCD present; extract fields but validate them before
 			 * returning to avoid trusting potentially corrupted archives. */
 			memcpy (eocd_out, buf + i, 22);
@@ -237,7 +237,7 @@ static long otezip_find_eocd(FILE *fp, uint8_t *eocd_out /*22+*/, size_t *cd_siz
 					continue;
 				}
 				fseek (fp, saved_pos, SEEK_SET);
-				if (otezip_rd32 (cd_sig) != MZIP_SIG_CDH) {
+				if (otezip_rd32 (cd_sig) != OTEZIP_SIG_CDH) {
 					/* CD doesn't start with valid header - try next EOCD candidate */
 					continue;
 				}
@@ -310,7 +310,7 @@ static int otezip_load_central(zip_t *za) {
 	uint16_t i;
 	for (i = 0; i < n_entries; i++) {
 		/* Ensure we have at least the fixed-size central header available */
-		if (off + 46 > cd_size || otezip_rd32 (cd_buf + off) != MZIP_SIG_CDH) {
+		if (off + 46 > cd_size || otezip_rd32 (cd_buf + off) != OTEZIP_SIG_CDH) {
 			free (cd_buf);
 			return OTEZIP_ERR_INCONS; /* malformed */
 		}
@@ -339,7 +339,7 @@ static int otezip_load_central(zip_t *za) {
 
 		/* Reject entries with absurdly large sizes to avoid allocating
 		 * more than our allowed maximum. */
-		if ((uint64_t)e->comp_size > MZIP_MAX_PAYLOAD || (uint64_t)e->uncomp_size > MZIP_MAX_PAYLOAD) {
+		if ((uint64_t)e->comp_size > OTEZIP_MAX_PAYLOAD || (uint64_t)e->uncomp_size > OTEZIP_MAX_PAYLOAD) {
 			free (cd_buf);
 			return OTEZIP_ERR_INCONS;
 		}
@@ -394,7 +394,7 @@ static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out
 	if (otezip_read_fully (za->fp, lfh, 30) != 0) {
 		return -1;
 	}
-	if (otezip_rd32 (lfh) != MZIP_SIG_LFH) {
+	if (otezip_rd32 (lfh) != OTEZIP_SIG_LFH) {
 		return -1;
 	}
 
@@ -414,7 +414,7 @@ static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out
 	if (data_ofs > file_sz) {
 		return -1;
 	}
-	if ((uint64_t)e->comp_size > MZIP_MAX_PAYLOAD || (uint64_t)e->uncomp_size > MZIP_MAX_PAYLOAD) {
+	if ((uint64_t)e->comp_size > OTEZIP_MAX_PAYLOAD || (uint64_t)e->uncomp_size > OTEZIP_MAX_PAYLOAD) {
 		return -1;
 	}
 	if (data_ofs + (uint64_t)e->comp_size > file_sz) {
@@ -1050,7 +1050,7 @@ zip_int64_t zip_file_add(zip_t *za, const char *name, zip_source_t *src, zip_fla
 	/* strdup is POSIX; allocate and copy to be portable and avoid
 	 * implicit declaration warnings. */
 	size_t nlen = strlen (name) + 1;
-	if (nlen - 1 > MZIP_MAX_FIELD_LEN) {
+	if (nlen - 1 > OTEZIP_MAX_FIELD_LEN) {
 		return -1;
 	}
 	e->name = (char *)malloc (nlen);
@@ -1068,7 +1068,7 @@ zip_int64_t zip_file_add(zip_t *za, const char *name, zip_source_t *src, zip_fla
 	}
 
 	/* Validate uncompressed size fits our limits and ZIP 32-bit field */
-	if ((uint64_t)src->len > MZIP_MAX_PAYLOAD || (uint64_t)src->len > (uint64_t)UINT32_MAX) {
+	if ((uint64_t)src->len > OTEZIP_MAX_PAYLOAD || (uint64_t)src->len > (uint64_t)UINT32_MAX) {
 		free (e->name);
 		return -1;
 	}
@@ -1108,7 +1108,7 @@ zip_int64_t zip_file_add(zip_t *za, const char *name, zip_source_t *src, zip_fla
 	}
 
 	/* Validate compressed size too */
-	if ((uint64_t)comp_size > MZIP_MAX_PAYLOAD) {
+	if ((uint64_t)comp_size > OTEZIP_MAX_PAYLOAD) {
 		free (e->name);
 		free (comp_buf);
 		return -1;
@@ -1396,14 +1396,14 @@ zip_t *zip_open_from_source(zip_source_t *src, int flags, zip_error_t *error) {
 static uint32_t otezip_write_local_header(FILE *fp, const char *name, uint32_t comp_method,
 	uint32_t comp_size, uint32_t uncomp_size, uint32_t crc32) {
 	size_t filename_len_sz = strlen (name);
-	if (filename_len_sz > MZIP_MAX_FIELD_LEN) {
-		filename_len_sz = MZIP_MAX_FIELD_LEN;
+	if (filename_len_sz > OTEZIP_MAX_FIELD_LEN) {
+		filename_len_sz = OTEZIP_MAX_FIELD_LEN;
 	}
 	uint16_t filename_len = (uint16_t)filename_len_sz;
 	uint8_t header[30];
 
 	/* Write local file header signature */
-	otezip_wr32 (header, MZIP_SIG_LFH);
+	otezip_wr32 (header, OTEZIP_SIG_LFH);
 
 	/* Version needed to extract (2.0) */
 	otezip_wr16 (header + 4, 20);
@@ -1449,14 +1449,14 @@ static uint32_t otezip_write_central_header(FILE *fp, const char *name, uint32_t
 	uint32_t comp_size, uint32_t uncomp_size, uint32_t crc32,
 	uint32_t local_header_offset, uint16_t file_time, uint16_t file_date, uint32_t external_attr) {
 	size_t filename_len_sz = strlen (name);
-	if (filename_len_sz > MZIP_MAX_FIELD_LEN) {
-		filename_len_sz = MZIP_MAX_FIELD_LEN;
+	if (filename_len_sz > OTEZIP_MAX_FIELD_LEN) {
+		filename_len_sz = OTEZIP_MAX_FIELD_LEN;
 	}
 	uint16_t filename_len = (uint16_t)filename_len_sz;
 	uint8_t header[46];
 
 	/* Central directory file header signature */
-	otezip_wr32 (header, MZIP_SIG_CDH);
+	otezip_wr32 (header, OTEZIP_SIG_CDH);
 
 	/* Version made by (UNIX, version 2.0) */
 	otezip_wr16 (header + 4, 0x031e);
@@ -1519,7 +1519,7 @@ static void otezip_write_end_of_central_directory(FILE *fp, uint32_t num_entries
 	uint8_t eocd[22];
 
 	/* End of central directory signature */
-	otezip_wr32 (eocd, MZIP_SIG_EOCD);
+	otezip_wr32 (eocd, OTEZIP_SIG_EOCD);
 
 	/* Number of this disk */
 	otezip_wr16 (eocd + 4, 0);
@@ -1588,7 +1588,7 @@ static int otezip_replace_entry_data(zip_t *za, zip_uint64_t index, zip_source_t
 	if (otezip_compress_data ((uint8_t *)src->buf, src->len, &comp_buf, &comp_size, &e->method) != 0) {
 		return -1;
 	}
-	if ((uint64_t)comp_size > MZIP_MAX_PAYLOAD) {
+	if ((uint64_t)comp_size > OTEZIP_MAX_PAYLOAD) {
 		free (comp_buf);
 		return -1;
 	}

@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <string.h>
-#include "mzip.h"
+#include "otezip.h"
 
 int main() {
 	uint8_t hello[] = "hello
@@ -8,7 +8,7 @@ int main() {
 		uint8_t *
 			compressed;
 	uint32_t comp_size;
-	mzip_compress_data (hello, 6, &compressed, &comp_size, MZIP_METHOD_DEFLATE);
+	otezip_compress_data (hello, 6, &compressed, &comp_size, OTEZIP_METHOD_DEFLATE);
 	printf ("Original: %s", hello);
 printf("Compressed size: %u
 ", comp_size);

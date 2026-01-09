@@ -216,6 +216,6 @@ int brotliDecompressInit2_(z_stream *strm, int windowBits, const char *version, 
 	return brotliDecompressInit (strm);
 }
 
-#endif /* MZIP_ENABLE_BROTLI */
+#endif /* OTEZIP_ENABLE_BROTLI */
 
 #endif /* MBROTLI_H */

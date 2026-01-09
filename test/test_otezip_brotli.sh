@@ -2,7 +2,7 @@
 # test_otezip_brotli.sh - Test Brotli compression/decompression in otezip
 #
 # This script tests the Brotli compression and decompression functionality
-# in mzip by:
+# in otezip by:
 # 1. Creating test files
 # 2. Adding them to a ZIP with Brotli compression
 # 3. Extracting the files from the ZIP
@@ -44,17 +44,17 @@ if [ ! -x "../otezip" ]; then
 fi
 
 # Path to otezip executable
-MZIP="../otezip"
+OTEZIP="../otezip"
 
 # Create ZIP file with Brotli compression
 echo "Creating ZIP file with Brotli compression..."
-$MZIP -c brotli test.zip test1.txt test2.txt test3.bin test4.bin
+$OTEZIP -c brotli test.zip test1.txt test2.txt test3.bin test4.bin
 
 # Extract the files to a different directory
 echo "Extracting files from ZIP..."
 mkdir -p extract
 cd extract
-$MZIP -x ../test.zip
+$OTEZIP -x ../test.zip
 
 # Compare the extracted files with the originals
 echo "Comparing extracted files with originals..."

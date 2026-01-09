@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 /* Include LZMA implementation */
-#define MZIP_ENABLE_LZMA
+#define OTEZIP_ENABLE_LZMA
 #include "../lzma.inc.c" /* This will include both encoder and decoder */
 
 int main(int argc, char *argv[]) {

@@ -1,6 +1,6 @@
-/* zstream.h - unified zlib-like z_stream struct for mzip */
-#ifndef MZIP_ZSTREAM_H
-#define MZIP_ZSTREAM_H
+/* zstream.h - unified zlib-like z_stream struct for otezip */
+#ifndef OTEZIP_ZSTREAM_H
+#define OTEZIP_ZSTREAM_H
 
 #include <stdint.h>
 
@@ -32,4 +32,4 @@ typedef struct {
     uLong reserved;         /* reserved for future use */
 } z_stream;
 
-#endif /* MZIP_ZSTREAM_H */
+#endif /* OTEZIP_ZSTREAM_H */
