@@ -1400,9 +1400,13 @@ zip_t *zip_open_from_source(zip_source_t *src, int flags, zip_error_t *error) {
 	 * then open the archive normally. */
 	char tmp_path[] = "/tmp/otezip_XXXXXX";
 	/* Set restrictive umask before mkstemp for security */
+#if defined(__wasi_) || defined(_WIN32) || defined(_WIN64)
+	int fd = otezip_mkstemp (tmp_path);
+#else
 	mode_t old_umask = umask (077);
 	int fd = otezip_mkstemp (tmp_path);
 	umask (old_umask);
+#endif
 	if (fd < 0) {
 		return NULL;
 	}
