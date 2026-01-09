@@ -288,12 +288,16 @@ int lzfseInit(z_stream *strm, int level) {
 }
 
 int lzfseCompress(z_stream *strm, int flush) {
-	if (!strm || (!strm->next_out && strm->avail_out)) {
+	if (!strm || !strm->next_out || !strm->next_in) {
 		return Z_STREAM_ERROR;
 	}
 
 	const size_t in_len = strm->avail_in;
 	const size_t out_cap = strm->avail_out;
+
+	if (out_cap == 0) {
+		return Z_BUF_ERROR;
+	}
 
 	size_t produced = lzfse_compress (strm->next_in, in_len,
 		strm->next_out, out_cap);
@@ -303,7 +307,7 @@ int lzfseCompress(z_stream *strm, int flush) {
 		strm->next_in += in_len;
 		strm->avail_in = 0;
 		strm->next_out += produced;
-		strm->avail_out = (uInt) (out_cap - produced);
+		strm->avail_out = (uInt) ((out_cap >= produced) ? (out_cap - produced) : 0);
 		strm->total_in += in_len;
 		strm->total_out += produced;
 	}

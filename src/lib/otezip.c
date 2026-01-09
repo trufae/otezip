@@ -241,15 +241,18 @@ static long otezip_find_eocd(FILE *fp, uint8_t *eocd_out /*22+*/, size_t *cd_siz
 			 * This handles files with embedded EOCD signatures in compressed data. */
 			if (entries > 0 && cd_size_tmp >= 4) {
 				long saved_pos = ftell (fp);
+				if (saved_pos < 0) {
+					continue;
+				}
 				if (fseek (fp, (long)cd_ofs_tmp, SEEK_SET) != 0) {
 					continue;
 				}
 				uint8_t cd_sig[4];
 				if (otezip_read_fully (fp, cd_sig, 4) != 0) {
-					fseek (fp, saved_pos, SEEK_SET);
+					(void) fseek (fp, saved_pos, SEEK_SET);
 					continue;
 				}
-				fseek (fp, saved_pos, SEEK_SET);
+				(void) fseek (fp, saved_pos, SEEK_SET);
 				if (otezip_rd32 (cd_sig) != OTEZIP_SIG_CDH) {
 					/* CD doesn't start with valid header - try next EOCD candidate */
 					continue;
@@ -299,7 +302,8 @@ static int otezip_load_central(zip_t *za) {
 	if (fseek (za->fp, cd_ofs, SEEK_SET) != 0) {
 		return OTEZIP_ERR_READ;
 	}
-	if (cd_size == 0) {
+	/* Validate central directory size isn't unreasonably large */
+	if (cd_size == 0 || cd_size > OTEZIP_MAX_PAYLOAD) {
 		return OTEZIP_ERR_INCONS;
 	}
 	uint8_t *cd_buf = (uint8_t *)malloc (cd_size);
@@ -309,6 +313,12 @@ static int otezip_load_central(zip_t *za) {
 	if (otezip_read_fully (za->fp, cd_buf, cd_size) != 0) {
 		free (cd_buf);
 		return OTEZIP_ERR_READ;
+	}
+
+	/* Validate number of entries is reasonable */
+	if (n_entries > 65535 || n_entries == 0) {
+		free (cd_buf);
+		return OTEZIP_ERR_INCONS;
 	}
 
 	za->entries = (struct otezip_entry *)calloc (n_entries, sizeof (struct otezip_entry));
@@ -470,6 +480,11 @@ static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out
 #ifdef OTEZIP_ENABLE_STORE
 	if (e->method == OTEZIP_METHOD_STORE) { /* stored – nothing to inflate */
 		ubuf = cbuf;
+		/* Ensure cbuf is properly initialized for STORE method */
+		if (e->comp_size > 0 && e->comp_size < e->uncomp_size) {
+			/* For STORE method with different sizes, zero the remaining part */
+			memset (ubuf + e->comp_size, 0, e->uncomp_size - e->comp_size);
+		}
 	}
 #endif
 #ifdef OTEZIP_ENABLE_DEFLATE
@@ -524,6 +539,7 @@ static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out
 			free (cbuf);
 			return -1;
 		}
+		memset (ubuf, 0, e->uncomp_size); /* Initialize output buffer */
 		z_stream strm = { 0 };
 		strm.next_in = cbuf;
 		strm.avail_in = e->comp_size;
@@ -552,6 +568,7 @@ static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out
 			free (cbuf);
 			return -1;
 		}
+		memset (ubuf, 0, e->uncomp_size); /* Initialize output buffer */
 		z_stream strm = { 0 };
 		strm.next_in = cbuf;
 		strm.avail_in = e->comp_size;
@@ -592,6 +609,7 @@ static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out
 			free (cbuf);
 			return -1;
 		}
+		memset (ubuf, 0, e->uncomp_size); /* Initialize output buffer */
 		z_stream strm = { 0 };
 		strm.next_in = cbuf;
 		strm.avail_in = e->comp_size;
@@ -620,6 +638,7 @@ static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out
 			free (cbuf);
 			return -1;
 		}
+		memset (ubuf, 0, e->uncomp_size); /* Initialize output buffer */
 		z_stream strm = { 0 };
 		strm.next_in = cbuf;
 		strm.avail_in = e->comp_size;
@@ -722,7 +741,6 @@ zip_t *zip_open(const char *path, int flags, int *errorp) {
 	if (strchr (mode, 'w')) {
 		unlink (path);
 		// mkrdir
-		creat (path, 0644);
 	}
 
 	FILE *fp = fopen (path, mode);
@@ -1381,7 +1399,10 @@ zip_t *zip_open_from_source(zip_source_t *src, int flags, zip_error_t *error) {
 	 * we create a temporary file and write the buffer to it,
 	 * then open the archive normally. */
 	char tmp_path[] = "/tmp/otezip_XXXXXX";
+	/* Set restrictive umask before mkstemp for security */
+	mode_t old_umask = umask (077);
 	int fd = otezip_mkstemp (tmp_path);
+	umask (old_umask);
 	if (fd < 0) {
 		return NULL;
 	}

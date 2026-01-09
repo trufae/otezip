@@ -294,15 +294,17 @@ int deflate(z_stream *strm, int flush) {
 			}
 
 			/* Write block header - type 00 (uncompressed) */
-			 *strm->next_out++ = state->is_last_block? 1: 0; /* Final block bit + type 00 */
+			*strm->next_out++ = state->is_last_block? 1: 0; /* Final block bit + type 00 */
 			strm->avail_out--;
 			strm->total_out++;
 
 			/* Pad to byte boundary if needed */
-			for (uint32_t i = 1; i < header_size; i++) {
-				*strm->next_out++ = 0;
-				strm->avail_out--;
-				strm->total_out++;
+			if (header_size > 1) {
+				for (uint32_t i = 1; i < header_size; i++) {
+					*strm->next_out++ = 0;
+					strm->avail_out--;
+					strm->total_out++;
+				}
 			}
 
 			/* Write length and inverted length */
@@ -487,7 +489,7 @@ int deflate(z_stream *strm, int flush) {
 				if (dist_extra_bits > 0) {
 					/* Calculate base distance value based on distance code */
 					const uint16_t dist_base_values[] = { 1, 5, 9, 17, 33, 65, 129, 257, 513, 1025, 2049, 4097, 8193, 16385 };
-					uint16_t base_dist = dist_extra_bits > 0? dist_base_values[dist_extra_bits]: 1;
+					uint16_t base_dist = dist_base_values[dist_extra_bits];
 
 					/* Get remainder by masking with appropriate bit mask */
 					int extra_value = (distance - base_dist) &((1 << dist_extra_bits) - 1);
