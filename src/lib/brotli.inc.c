@@ -108,23 +108,23 @@ int brotliCompress(z_stream *strm, int flush) {
 		if (compressed_size == 0) {
 			return Z_BUF_ERROR;
 		}
-		strm->next_in += strm->avail_in;
-		strm->total_in += strm->avail_in;
+		strm->next_in += (uint32_t)strm->avail_in;
+		strm->total_in += (uint32_t)strm->avail_in;
 		strm->avail_in = 0;
-		strm->next_out += compressed_size;
-		strm->total_out += compressed_size;
-		strm->avail_out -= compressed_size;
+		strm->next_out += (uint32_t)compressed_size;
+		strm->total_out += (uint32_t)compressed_size;
+		strm->avail_out -= (uint32_t)compressed_size;
 		return Z_STREAM_END;
 	}
 	size_t copy_size = strm->avail_in < strm->avail_out? strm->avail_in: strm->avail_out;
 	if (copy_size > 0) {
 		memcpy (strm->next_out, strm->next_in, copy_size);
-		strm->next_in += copy_size;
-		strm->next_out += copy_size;
-		strm->avail_in -= copy_size;
-		strm->avail_out -= copy_size;
-		strm->total_in += copy_size;
-		strm->total_out += copy_size;
+		strm->next_in += (uint32_t)copy_size;
+		strm->next_out += (uint32_t)copy_size;
+		strm->avail_in -= (uint32_t)copy_size;
+		strm->avail_out -= (uint32_t)copy_size;
+		strm->total_in += (uint32_t)copy_size;
+		strm->total_out += (uint32_t)copy_size;
 	}
 	return Z_OK;
 }
@@ -173,12 +173,12 @@ int brotliDecompress(z_stream *strm, int flush) {
 		}
 		return Z_DATA_ERROR;
 	}
-	strm->next_in += strm->avail_in;
-	strm->total_in += strm->avail_in;
+	strm->next_in += (uint32_t)strm->avail_in;
+	strm->total_in += (uint32_t)strm->avail_in;
 	strm->avail_in = 0;
-	strm->next_out += decompressed_size;
-	strm->total_out += decompressed_size;
-	strm->avail_out -= decompressed_size;
+	strm->next_out += (uint32_t)decompressed_size;
+	strm->total_out += (uint32_t)decompressed_size;
+	strm->avail_out -= (uint32_t)decompressed_size;
 	return Z_STREAM_END;
 }
 

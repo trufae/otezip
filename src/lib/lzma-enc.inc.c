@@ -144,12 +144,12 @@ static int simple_lzma_compress(const uint8_t *src, size_t src_size,
 			/* Encode run */
 			dst[dst_pos++] = 0x00; /* RLE marker */
 			dst[dst_pos++] = run_byte; /* Repeated byte */
-			dst[dst_pos++] = run_length; /* Length */
+			dst[dst_pos++] = (uint8_t)run_length; /* Length */
 			src_pos += run_length;
 		} else {
 			/* Literal */
 			dst[dst_pos++] = 0x01; /* Literal marker */
-			dst[dst_pos++] = run_length; /* Number of literals */
+			dst[dst_pos++] = (uint8_t)run_length; /* Number of literals */
 
 			/* Copy literals */
 			if (dst_pos + run_length > dst_capacity) {
@@ -162,7 +162,7 @@ static int simple_lzma_compress(const uint8_t *src, size_t src_size,
 		}
 	}
 
-	return dst_pos; /* Return compressed size */
+	return (int)dst_pos; /* Return compressed size */
 }
 
 /* --- LZMA API Implementation --- */
@@ -299,9 +299,9 @@ int lzmaCompress(z_stream *strm, int flush) {
 			strm->total_out += compressed_size;
 
 			/* Update input pointers/counters */
-			strm->next_in += input_size;
-			strm->avail_in -= input_size;
-			strm->total_in += input_size;
+			strm->next_in += (uint32_t)input_size;
+			strm->avail_in -= (uint32_t)input_size;
+			strm->total_in += (uint32_t)input_size;
 
 			remaining -= input_size;
 		}

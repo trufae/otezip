@@ -150,7 +150,7 @@ static int simple_lzma_decompress(const uint8_t *props,
 		}
 	}
 
-	return dst_pos; /* Return decompressed size */
+	return (int)dst_pos; /* Return decompressed size */
 }
 
 /* Read 64-bit little endian integer */
@@ -245,10 +245,10 @@ int lzmaDecompress(z_stream *strm, int flush) {
 			copy_size);
 
 		/* Update counters */
-		strm->next_out += copy_size;
-		strm->avail_out -= copy_size;
-		strm->total_out += copy_size;
-		ctx->current_block_remaining -= copy_size;
+		strm->next_out += (uint32_t)copy_size;
+		strm->avail_out -= (uint32_t)copy_size;
+		strm->total_out += (uint32_t)copy_size;
+		ctx->current_block_remaining -= (int)copy_size;
 
 		/* If we filled the output buffer, return for more space */
 		if (strm->avail_out == 0) {
@@ -278,14 +278,14 @@ int lzmaDecompress(z_stream *strm, int flush) {
 		if (strm->avail_out >= decomp_size) {
 			/* Copy all data to output */
 			memcpy (strm->next_out, ctx->decompress_buffer, decomp_size);
-			strm->next_out += decomp_size;
-			strm->avail_out -= decomp_size;
-			strm->total_out += decomp_size;
+			strm->next_out += (uint32_t)decomp_size;
+			strm->avail_out -= (uint32_t)decomp_size;
+			strm->total_out += (uint32_t)decomp_size;
 		} else {
 			/* Store partial data for later */
 			memcpy (strm->next_out, ctx->decompress_buffer, strm->avail_out);
-			ctx->current_block_size = decomp_size;
-			ctx->current_block_remaining = decomp_size - strm->avail_out;
+			ctx->current_block_size = (uint32_t)decomp_size;
+			ctx->current_block_remaining = (int)(decomp_size - strm->avail_out);
 			strm->total_out += strm->avail_out;
 			strm->next_out += strm->avail_out;
 			strm->avail_out = 0;

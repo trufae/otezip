@@ -304,12 +304,12 @@ int lzfseCompress(z_stream *strm, int flush) {
 
 	if (produced) {
 		/* advance pointers */
-		strm->next_in += in_len;
+		strm->next_in += (uint32_t)in_len;
 		strm->avail_in = 0;
-		strm->next_out += produced;
+		strm->next_out += (uint32_t)produced;
 		strm->avail_out = (uInt) ((out_cap >= produced) ? (out_cap - produced) : 0);
-		strm->total_in += in_len;
-		strm->total_out += produced;
+		strm->total_in += (uint32_t)in_len;
+		strm->total_out += (uint32_t)produced;
 	}
 	return lzfse__map_result (produced, flush);
 }
@@ -341,12 +341,12 @@ int lzfseDecompress(z_stream *strm, int flush) {
 		strm->next_out, out_cap);
 
 	if (produced) {
-		strm->next_in += in_len;
+		strm->next_in += (uint32_t)in_len;
 		strm->avail_in = 0;
-		strm->next_out += produced;
+		strm->next_out += (uint32_t)produced;
 		strm->avail_out = (uInt) (out_cap - produced);
-		strm->total_in += in_len;
-		strm->total_out += produced;
+		strm->total_in += (uint32_t)in_len;
+		strm->total_out += (uint32_t)produced;
 	}
 	return lzfse__map_result (produced, flush);
 }

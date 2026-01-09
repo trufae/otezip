@@ -9,6 +9,11 @@
 #define _GNU_SOURCE
 #define OTEZIP_IMPLEMENTATION
 
+/* Suppress MSVC deprecation warnings for POSIX functions on Windows */
+#if defined(_MSC_VER)
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -802,7 +807,7 @@ static int otezip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_b
 #ifdef OTEZIP_ENABLE_DEFLATE
 	if (*method == OTEZIP_METHOD_DEFLATE) {
 		/* Deflate compression */
-		unsigned long comp_bound = compressBound (in_size);
+		unsigned long comp_bound = compressBound ((unsigned long)in_size);
 		*out_buf = (uint8_t *)malloc (comp_bound);
 		if (!*out_buf) {
 			return -1;
@@ -815,9 +820,9 @@ static int otezip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_b
 			return -1;
 		}
 		strm.next_in = in_buf;
-		strm.avail_in = in_size;
+		strm.avail_in = (uint32_t)in_size;
 		strm.next_out = *out_buf;
-		strm.avail_out = comp_bound;
+		strm.avail_out = (uint32_t)comp_bound;
 
 		if (deflate (&strm, Z_FINISH) != Z_STREAM_END) {
 			deflateEnd (&strm);
@@ -970,9 +975,9 @@ static int otezip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_b
 		}
 
 		strm.next_in = in_buf;
-		strm.avail_in = in_size;
+		strm.avail_in = (uint32_t)in_size;
 		strm.next_out = *out_buf;
-		strm.avail_out = (unsigned int)out_cap;
+		strm.avail_out = (uint32_t)out_cap;
 
 		int ret = lzmaCompress (&strm, Z_FINISH);
 		if (ret != Z_STREAM_END) {
@@ -1400,7 +1405,7 @@ zip_t *zip_open_from_source(zip_source_t *src, int flags, zip_error_t *error) {
 	 * then open the archive normally. */
 	char tmp_path[] = "/tmp/otezip_XXXXXX";
 	/* Set restrictive umask before mkstemp for security */
-#if defined(__wasi_) || defined(_WIN32) || defined(_WIN64)
+#if defined(__wasi__) || defined(_WIN32) || defined(_WIN64)
 	int fd = otezip_mkstemp (tmp_path);
 #else
 	mode_t old_umask = umask (077);
@@ -1411,7 +1416,7 @@ zip_t *zip_open_from_source(zip_source_t *src, int flags, zip_error_t *error) {
 		return NULL;
 	}
 	/* Write the source buffer to the temp file */
-	ssize_t written = write (fd, src->buf, src->len);
+	ssize_t written = write (fd, src->buf, (size_t)src->len);
 	close (fd);
 	if (written != (ssize_t)src->len) {
 		unlink (tmp_path);

@@ -204,7 +204,7 @@ static int decompress_block(const uint8_t *src, size_t src_size,
 
 	/* Just copy raw data - we're not actually compressing */
 	memcpy (dst, src, src_size);
-	return src_size; /* Return decompressed size */
+	return (int)src_size; /* Return decompressed size */
 }
 
 /* --- Zstandard API Implementation --- */
