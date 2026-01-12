@@ -278,34 +278,27 @@ int deflate(z_stream *strm, int flush) {
 	/* If no compression wanted or very small level, just store uncompressed */
 	if (state->level == Z_NO_COMPRESSION) {
 		if (strm->avail_in > 0) {
-			/* Calculate block header size - 3 bits for header + padding to byte boundary */
-			uint32_t header_size = 3;
-			if (header_size % 8 != 0) {
-				header_size = ((header_size / 8) + 1) * 8; /* Round up to next byte */
-			}
-			header_size = header_size / 8; /* Convert to bytes */
-
-			/* Calculate block size - header + length fields + data */
-			uint32_t block_size = header_size + 4 + strm->avail_in;
+			/* Calculate block size - length fields + data */
+			uint32_t block_size = 4 + strm->avail_in;
 
 			/* Check if we have enough output space */
 			if (strm->avail_out < block_size) {
 				return Z_BUF_ERROR;
 			}
 
-			/* Write block header - type 00 (uncompressed) */
-			*strm->next_out++ = state->is_last_block? 1: 0; /* Final block bit + type 00 */
-			strm->avail_out--;
-			strm->total_out++;
-
-			/* Pad to byte boundary if needed */
-			if (header_size > 1) {
-				for (uint32_t i = 1; i < header_size; i++) {
-					*strm->next_out++ = 0;
-					strm->avail_out--;
-					strm->total_out++;
-				}
+			/* Write block header using bit buffer - final bit + type 00 (uncompressed) */
+			int ret = write_bits (strm, state, state->is_last_block? 1: 0, 1); /* Final block bit */
+			if (ret != Z_OK) {
+				return ret;
 			}
+
+			ret = write_bits (strm, state, 0, 2); /* Block type 00 */
+			if (ret != Z_OK) {
+				return ret;
+			}
+
+			/* Flush remaining bits to achieve byte alignment for uncompressed data */
+			flush_bits (strm, state);
 
 			/* Write length and inverted length */
 			uint16_t len = strm->avail_in > 0xFFFF? 0xFFFF: strm->avail_in;
