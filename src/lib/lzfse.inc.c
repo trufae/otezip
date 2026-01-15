@@ -145,7 +145,7 @@ static size_t lz77_parse(const uint8_t *in, size_t in_sz,
 			(32 - HLOG);
 		uint32_t prev = hash[h];
 		hash[h] = (uint32_t)pos;
-		uint32_t distance = pos - prev;
+		uint32_t distance = (uint32_t)pos - prev;
 		if (prev && distance <= LZFSE_WINDOW_SIZE &&
 			pos + 4 < in_sz && memcmp (in + prev, in + pos, 4) == 0) {
 			/* Found a match – extend */

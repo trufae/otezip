@@ -1416,9 +1416,9 @@ zip_t *zip_open_from_source(zip_source_t *src, int flags, zip_error_t *error) {
 		return NULL;
 	}
 	/* Write the source buffer to the temp file */
-	ssize_t written = write (fd, src->buf, (size_t)src->len);
+	ssize_t written = write (fd, src->buf, (unsigned int)src->len);
 	close (fd);
-	if (written != (ssize_t)src->len) {
+	if ((int)written != (int)src->len) {
 		unlink (tmp_path);
 		return NULL;
 	}
