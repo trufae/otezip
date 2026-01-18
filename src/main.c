@@ -60,6 +60,10 @@ static int g_force = 0;
 #if defined(_WIN32) || defined(_WIN64)
 #define OTEZIP_MKDIR(path, mode) _mkdir (path)
 #define OTEZIP_LSTAT(path, buf) stat((path),(buf))
+/* O_NOFOLLOW is not available on Windows, define as no-op */
+#ifndef O_NOFOLLOW
+#define O_NOFOLLOW 0
+#endif
 #ifndef OTEZIP_FCHMOD
 /* On Windows (MinGW/MSVC) there's no reliable fchmod that maps to POSIX
  * permissions. Setting unix-style permission bits isn't meaningful on NTFS in
@@ -498,7 +502,7 @@ static int extract_all(const char *path) {
 					zip_fclose (zf);
 					continue;
 				}
-				fd = open (fname_sanitized, O_WRONLY | O_TRUNC);
+				fd = open (fname_sanitized, O_WRONLY | O_TRUNC | O_NOFOLLOW);
 				if (fd < 0) {
 					fprintf (stderr, "Cannot open for overwrite %s: %s\n", fname_sanitized, strerror (errno));
 					zip_fclose (zf);
