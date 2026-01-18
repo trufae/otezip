@@ -40,6 +40,12 @@ extern int deflateEnd(z_stream *strm);
 #include <sys/types.h>
 #include <errno.h>
 #include <fcntl.h>
+
+/* Ensure O_NOFOLLOW is defined - on Windows it's not available, so define as 0 */
+#ifndef O_NOFOLLOW
+#define O_NOFOLLOW 0
+#endif
+
 #ifdef _WIN32
 #include <direct.h>
 #include <io.h>
@@ -60,10 +66,6 @@ static int g_force = 0;
 #if defined(_WIN32) || defined(_WIN64)
 #define OTEZIP_MKDIR(path, mode) _mkdir (path)
 #define OTEZIP_LSTAT(path, buf) stat((path),(buf))
-/* O_NOFOLLOW is not available on Windows, define as no-op */
-#ifndef O_NOFOLLOW
-#define O_NOFOLLOW 0
-#endif
 #ifndef OTEZIP_FCHMOD
 /* On Windows (MinGW/MSVC) there's no reliable fchmod that maps to POSIX
  * permissions. Setting unix-style permission bits isn't meaningful on NTFS in
