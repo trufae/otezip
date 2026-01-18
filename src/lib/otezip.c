@@ -1429,7 +1429,7 @@ zip_t *zip_open_from_source(zip_source_t *src, int flags, zip_error_t *error) {
 		return NULL;
 	}
 	/* Write the source buffer to the temp file */
-	int written = (int) write (fd, src->buf, (unsigned int)src->len);
+	int written = (int)write (fd, src->buf, (unsigned int)src->len);
 	close (fd);
 	if ((int)written != (int)src->len) {
 		unlink (tmp_path);
