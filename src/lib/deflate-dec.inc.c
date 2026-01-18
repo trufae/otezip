@@ -162,9 +162,10 @@ static int read_dynamic_huffman(z_stream *strm, inflate_state *state) {
 	}
 
 	/* Read literal/length and distance code lengths */
-	uint8_t ll_lengths[286 + 32] = { 0 }; /* Literal/length + distance code lengths */
+#define LL_LENGTHS_MAX (286 + 32)
+	uint8_t ll_lengths[LL_LENGTHS_MAX] = { 0 }; /* Literal/length + distance code lengths */
 	int index = 0;
-	while (index < hlit + hdist) {
+	while (index < hlit + hdist && index < LL_LENGTHS_MAX) {
 		/* Decode code length */
 		int code = 0;
 		int len = 0;
@@ -198,6 +199,7 @@ static int read_dynamic_huffman(z_stream *strm, inflate_state *state) {
 		/* Process code */
 		if (code < 16) {
 			/* Literal code length */
+			if (index >= LL_LENGTHS_MAX) return Z_DATA_ERROR;
 			ll_lengths[index++] = code;
 		} else {
 			/* Repeat code */
@@ -240,7 +242,7 @@ static int read_dynamic_huffman(z_stream *strm, inflate_state *state) {
 			}
 
 			/* Check for index overflow */
-			if (index + repeat_count > hlit + hdist) {
+			if (index + repeat_count > hlit + hdist || index + repeat_count > LL_LENGTHS_MAX) {
 				return Z_DATA_ERROR;
 			}
 
