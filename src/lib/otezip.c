@@ -1429,7 +1429,7 @@ zip_t *zip_open_from_source(zip_source_t *src, int flags, zip_error_t *error) {
 		return NULL;
 	}
 	/* Write the source buffer to the temp file */
-	ssize_t written = write (fd, src->buf, (unsigned int)src->len);
+	int written = (int) write (fd, src->buf, (unsigned int)src->len);
 	close (fd);
 	if ((int)written != (int)src->len) {
 		unlink (tmp_path);
@@ -1440,11 +1440,7 @@ zip_t *zip_open_from_source(zip_source_t *src, int flags, zip_error_t *error) {
 	zip_t *za = zip_open (tmp_path, flags, &errorp);
 	if (!za) {
 		unlink (tmp_path);
-		return NULL;
 	}
-	/* Note: The temp file will be cleaned up when the archive is closed.
-	 * This is a simple implementation; a more sophisticated one would
-	 * handle in-memory sources directly. */
 	return za;
 }
 
