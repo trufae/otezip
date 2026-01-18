@@ -796,6 +796,17 @@ static int otezip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_b
 	*out_buf = NULL;
 	*out_size = 0;
 
+	/* Handle zero-length input specially to prevent division by zero issues */
+	if (in_size == 0) {
+		*out_buf = (uint8_t *)malloc(1); /* Allocate minimal buffer */
+		if (!*out_buf) {
+			return -1;
+		}
+		*out_size = 0;
+		*method = OTEZIP_METHOD_STORE;
+		return 0;
+	}
+
 #ifdef OTEZIP_ENABLE_STORE
 	if (*method == OTEZIP_METHOD_STORE) {
 		/* Store (no compression) */
