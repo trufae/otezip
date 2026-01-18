@@ -29,8 +29,7 @@ typedef struct {
 /* ----------- Encoder-specific functions ----------- */
 
 /* Find longest match at current position */
-static int find_longest_match(deflate_state *state, const uint8_t *data,
-	uint32_t pos, uint32_t max_len, uint32_t *match_pos) {
+static int find_longest_match(deflate_state *state, const uint8_t *data, uint32_t pos, uint32_t max_len, uint32_t *match_pos) {
 	/* Need at least 3 bytes for a match */
 	if (max_len < 3) {
 		return 0;
@@ -113,8 +112,7 @@ static int find_longest_match(deflate_state *state, const uint8_t *data,
 }
 
 /* Write bits to output buffer */
-static int write_bits(z_stream *strm, deflate_state *state,
-	uint32_t bits, int num_bits) {
+static int write_bits(z_stream *strm, deflate_state *state, uint32_t bits, int num_bits) {
 	/* Add bits to buffer */
 	state->bit_buffer |= (bits << state->bits_in_buffer);
 	state->bits_in_buffer += num_bits;
@@ -185,23 +183,20 @@ static void init_fixed_huffman_deflate(deflate_state *state) {
 }
 
 /* Write a Huffman code to output */
-static int write_huffman_code(z_stream *strm, deflate_state *state,
-	uint16_t code, uint8_t code_length) {
+static int write_huffman_code(z_stream *strm, deflate_state *state, uint16_t code, uint8_t code_length) {
 	return write_bits (strm, state, code, code_length);
 }
 
 /* ----------- Main encoder API functions ----------- */
 
 /* Compatibility wrapper for zlib */
-int deflateInit2_(z_stream *strm, int level, int method, int windowBits,
-	int memLevel, int strategy, const char *version, int stream_size) {
+int deflateInit2_(z_stream *strm, int level, int method, int windowBits, int memLevel, int strategy, const char *version, int stream_size) {
 	(void)version; /* Unused */
 	(void)stream_size; /* Unused */
 	return deflateInit2 (strm, level, method, windowBits, memLevel, strategy);
 }
 
-int deflateInit2(z_stream *strm, int level, int method, int windowBits,
-	int memLevel, int strategy) {
+int deflateInit2(z_stream *strm, int level, int method, int windowBits, int memLevel, int strategy) {
 	if (!strm) {
 		return Z_STREAM_ERROR;
 	}
@@ -348,8 +343,7 @@ int deflate(z_stream *strm, int flush) {
 
 			/* Skip match search for level < 3 or not enough data */
 			if (state->level >= 3 && max_look_ahead >= 3) {
-				match_len = find_longest_match (state, strm->next_in, state->window_pos,
-					max_look_ahead, &match_pos);
+				match_len = find_longest_match (state, strm->next_in, state->window_pos, max_look_ahead, &match_pos);
 			}
 
 			if (match_len >= 3) {
@@ -386,9 +380,7 @@ int deflate(z_stream *strm, int flush) {
 				}
 
 				/* Write length code */
-				write_huffman_code (strm, state,
-					state->literals.codes[length_code],
-					state->literals.lengths[length_code]);
+				write_huffman_code (strm, state, state->literals.codes[length_code], state->literals.lengths[length_code]);
 
 				/* Write extra bits for length if needed */
 				if (extra_bits > 0) {
@@ -474,9 +466,7 @@ int deflate(z_stream *strm, int flush) {
 				}
 
 				/* Write distance code */
-				write_huffman_code (strm, state,
-					state->distances.codes[distance_code],
-					state->distances.lengths[distance_code]);
+				write_huffman_code (strm, state, state->distances.codes[distance_code], state->distances.lengths[distance_code]);
 
 				/* Write extra bits for distance if needed */
 				if (dist_extra_bits > 0) {
@@ -510,9 +500,7 @@ int deflate(z_stream *strm, int flush) {
 				uint8_t literal = *strm->next_in;
 
 				/* Write literal code */
-				write_huffman_code (strm, state,
-					state->literals.codes[literal],
-					state->literals.lengths[literal]);
+				write_huffman_code (strm, state, state->literals.codes[literal], state->literals.lengths[literal]);
 
 				/* Update input position and window */
 				state->window[state->window_pos] = literal;
@@ -527,9 +515,7 @@ int deflate(z_stream *strm, int flush) {
 		/* If this is the end of stream, write end of block marker */
 		if (flush == Z_FINISH) {
 			/* Write end of block symbol (256) */
-			write_huffman_code (strm, state,
-				state->literals.codes[256],
-				state->literals.lengths[256]);
+			write_huffman_code (strm, state, state->literals.codes[256], state->literals.lengths[256]);
 			/* Flush remaining bits */
 			flush_bits (strm, state);
 		}

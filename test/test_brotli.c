@@ -123,8 +123,7 @@ int main() {
 			continue;
 		}
 
-		printf ("  Compressed size: %zu bytes (%.2f%%)\n", comp_size,
-			(float)comp_size * 100.0f / (float)input_len);
+		printf ("  Compressed size: %zu bytes (%.2f%%)\n", comp_size, (float)comp_size * 100.0f / (float)input_len);
 
 		/* Decompress the compressed buffer */
 		decomp_size = decompress_buffer (compressed, comp_size, decompressed, MAX_DECOMP_SIZE);

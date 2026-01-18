@@ -43,10 +43,8 @@ extern "C" {
 /* ================================================================
 Public API
 ================================================================ */
-size_t lzfse_compress(const void *in, size_t in_sz,
-	void *out, size_t out_cap);
-size_t lzfse_decompress(const void *in, size_t in_sz,
-	void *out, size_t out_cap);
+size_t lzfse_compress(const void *in, size_t in_sz, void *out, size_t out_cap);
+size_t lzfse_decompress(const void *in, size_t in_sz, void *out, size_t out_cap);
 
 /* ================================================================
 Compile-time configuration
@@ -126,9 +124,7 @@ static inline void bw_flush(bw_t *b) {
 1. LZ77 GREEDY PARSER(encoder side)
 ================================================================ */
 
-static size_t lz77_parse(const uint8_t *in, size_t in_sz,
-	uint32_t *litlens, uint32_t *matchlens, uint32_t *offs,
-	size_t max_seqs) {
+static size_t lz77_parse(const uint8_t *in, size_t in_sz, uint32_t *litlens, uint32_t *matchlens, uint32_t *offs, size_t max_seqs) {
 	/* Very small hash table: 16 Ki entries, open-addressed */
 	enum { HLOG = 14,
 		HSIZE = 1 << HLOG };
@@ -180,8 +176,7 @@ static size_t lz77_parse(const uint8_t *in, size_t in_sz,
 2. *Raw* LZFSE block writer(tag 0x06)
 ================================================================ */
 
-static size_t lzfse_write_raw_block(const uint8_t *in, size_t in_sz,
-	uint8_t *out, size_t out_cap) {
+static size_t lzfse_write_raw_block(const uint8_t *in, size_t in_sz, uint8_t *out, size_t out_cap) {
 	if (in_sz + 5 > out_cap) {
 		return 0; /* header (1)+len (4)+data */
 	}
@@ -198,8 +193,7 @@ static size_t lzfse_write_raw_block(const uint8_t *in, size_t in_sz,
 3. Full compressor(calls parser + raw block writer)
 ================================================================ */
 
-size_t lzfse_compress(const void *in_, size_t in_sz,
-	void *out_, size_t out_cap) {
+size_t lzfse_compress(const void *in_, size_t in_sz, void *out_, size_t out_cap) {
 	const uint8_t *in = (const uint8_t *)in_;
 	uint8_t *out = (uint8_t *)out_;
 
@@ -228,8 +222,7 @@ size_t lzfse_compress(const void *in_, size_t in_sz,
 4. Decompressor – handles raw(0x06) and coded(0x03…0x05) blocks
 ================================================================ */
 
-static size_t lzfse_decode_raw_block(const uint8_t *src, size_t src_sz,
-	uint8_t *dst, size_t dst_cap) {
+static size_t lzfse_decode_raw_block(const uint8_t *src, size_t src_sz, uint8_t *dst, size_t dst_cap) {
 	if (src_sz < 5 || src[0] != 0x06) {
 		return 0;
 	}
@@ -248,8 +241,7 @@ static size_t lzfse_decode_raw_block(const uint8_t *src, size_t src_sz,
  * full FSE machinery here, but the scaffolding (bit-reader, window, etc.)
  * is already present, so you can paste your own decoder later.          */
 
-size_t lzfse_decompress(const void *in_, size_t in_sz,
-	void *out_, size_t out_cap) {
+size_t lzfse_decompress(const void *in_, size_t in_sz, void *out_, size_t out_cap) {
 	if (in_sz == 0 || out_cap == 0) {
 		return 0;
 	}
@@ -299,15 +291,14 @@ int lzfseCompress(z_stream *strm, int flush) {
 		return Z_BUF_ERROR;
 	}
 
-	size_t produced = lzfse_compress (strm->next_in, in_len,
-		strm->next_out, out_cap);
+	size_t produced = lzfse_compress (strm->next_in, in_len, strm->next_out, out_cap);
 
 	if (produced) {
 		/* advance pointers */
 		strm->next_in += (uint32_t)in_len;
 		strm->avail_in = 0;
 		strm->next_out += (uint32_t)produced;
-		strm->avail_out = (uInt) ((out_cap >= produced) ? (out_cap - produced) : 0);
+		strm->avail_out = (uInt) ((out_cap >= produced)? (out_cap - produced): 0);
 		strm->total_in += (uint32_t)in_len;
 		strm->total_out += (uint32_t)produced;
 	}
@@ -337,8 +328,7 @@ int lzfseDecompress(z_stream *strm, int flush) {
 	const size_t in_len = strm->avail_in;
 	const size_t out_cap = strm->avail_out;
 
-	size_t produced = lzfse_decompress (strm->next_in, in_len,
-		strm->next_out, out_cap);
+	size_t produced = lzfse_decompress (strm->next_in, in_len, strm->next_out, out_cap);
 
 	if (produced) {
 		strm->next_in += (uint32_t)in_len;
@@ -357,8 +347,7 @@ int lzfseDecompressEnd(z_stream *strm) {
 }
 
 /* ---------------- «Init2» convenience aliases ---------------- */
-int lzfseCompressInit2(z_stream *strm, int level,
-	int windowBits, int memLevel, int strategy) {
+int lzfseCompressInit2(z_stream *strm, int level, int windowBits, int memLevel, int strategy) {
 	(void)windowBits;
 	(void)memLevel;
 	(void)strategy;
@@ -370,16 +359,13 @@ int lzfseDecompressInit2(z_stream *strm, int windowBits) {
 	return lzfseDecompressInit (strm);
 }
 
-int lzfseCompressInit2_(z_stream *strm, int level, int windowBits,
-	int memLevel, int strategy,
-	const char *version, int stream_size) {
+int lzfseCompressInit2_(z_stream *strm, int level, int windowBits, int memLevel, int strategy, const char *version, int stream_size) {
 	(void)version;
 	(void)stream_size;
 	return lzfseCompressInit2 (strm, level, windowBits, memLevel, strategy);
 }
 
-int lzfseDecompressInit2_(z_stream *strm, int windowBits,
-	const char *version, int stream_size) {
+int lzfseDecompressInit2_(z_stream *strm, int windowBits, const char *version, int stream_size) {
 	(void)version;
 	(void)stream_size;
 	return lzfseDecompressInit2 (strm, windowBits);

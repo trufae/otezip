@@ -87,8 +87,7 @@ int lzmaDecompressEnd(z_stream *strm);
 
 /* Helpers for zlib compatibility layer */
 int lzmaDecompressInit2(z_stream *strm, int windowBits);
-int lzmaDecompressInit2_(z_stream *strm, int windowBits,
-	const char *version, int stream_size);
+int lzmaDecompressInit2_(z_stream *strm, int windowBits, const char *version, int stream_size);
 
 #ifdef __cplusplus
 }
@@ -101,8 +100,10 @@ int lzmaDecompressInit2_(z_stream *strm, int windowBits,
 
 /* Simple decompression for our LZMA block */
 static int simple_lzma_decompress(const uint8_t *props,
-	const uint8_t *src, size_t src_size,
-	uint8_t *dst, size_t dst_capacity) {
+	const uint8_t *src,
+	size_t src_size,
+	uint8_t *dst,
+	size_t dst_capacity) {
 	if (!props || !src || !dst || src_size == 0) {
 		return 0; /* Invalid inputs */
 	}
@@ -260,7 +261,8 @@ int lzmaDecompress(z_stream *strm, int flush) {
 	if (strm->avail_in > 0) {
 		/* Try to decompress what we have */
 		size_t decomp_size = simple_lzma_decompress (ctx->properties,
-			strm->next_in, strm->avail_in,
+			strm->next_in,
+			strm->avail_in,
 			ctx->decompress_buffer,
 			ctx->decompress_buffer_size);
 
@@ -285,7 +287,7 @@ int lzmaDecompress(z_stream *strm, int flush) {
 			/* Store partial data for later */
 			memcpy (strm->next_out, ctx->decompress_buffer, strm->avail_out);
 			ctx->current_block_size = (uint32_t)decomp_size;
-			ctx->current_block_remaining = (int)(decomp_size - strm->avail_out);
+			ctx->current_block_remaining = (int) (decomp_size - strm->avail_out);
 			strm->total_out += strm->avail_out;
 			strm->next_out += strm->avail_out;
 			strm->avail_out = 0;
@@ -335,8 +337,7 @@ int lzmaDecompressInit2(z_stream *strm, int windowBits) {
 	return lzmaDecompressInit (strm);
 }
 
-int lzmaDecompressInit2_(z_stream *strm, int windowBits,
-	const char *version, int stream_size) {
+int lzmaDecompressInit2_(z_stream *strm, int windowBits, const char *version, int stream_size) {
 	(void)version; /* Unused */
 	(void)stream_size; /* Unused */
 	return lzmaDecompressInit2 (strm, windowBits);

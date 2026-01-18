@@ -94,11 +94,8 @@ int lzmaCompress(z_stream *strm, int flush);
 int lzmaEnd(z_stream *strm);
 
 /* Helpers for zlib compatibility layer */
-int lzmaCompressInit2(z_stream *strm, int level, int windowBits,
-	int memLevel, int strategy);
-int lzmaCompressInit2_(z_stream *strm, int level, int windowBits,
-	int memLevel, int strategy,
-	const char *version, int stream_size);
+int lzmaCompressInit2(z_stream *strm, int level, int windowBits, int memLevel, int strategy);
+int lzmaCompressInit2_(z_stream *strm, int level, int windowBits, int memLevel, int strategy, const char *version, int stream_size);
 
 #ifdef __cplusplus
 }
@@ -110,9 +107,7 @@ int lzmaCompressInit2_(z_stream *strm, int level, int windowBits,
 /* --- Helper Functions --- */
 
 /* Simple Byte-by-byte LZ compression for LZMA blocks */
-static int simple_lzma_compress(const uint8_t *src, size_t src_size,
-	uint8_t *dst, size_t dst_capacity,
-	uint8_t *props) {
+static int simple_lzma_compress(const uint8_t *src, size_t src_size, uint8_t *dst, size_t dst_capacity, uint8_t *props) {
 	/* This is a very simplified compression that just does basic RLE-like compression */
 	if (src_size == 0 || !src || !dst || dst_capacity < LZMA_HEADER_SIZE + src_size) {
 		return 0; /* Invalid input or not enough output capacity */
@@ -280,10 +275,7 @@ int lzmaCompress(z_stream *strm, int flush) {
 				return Z_BUF_ERROR;
 			}
 
-			int compressed_size = simple_lzma_compress (strm->next_in, input_size,
-				ctx->compress_buffer,
-				ctx->compress_buffer_size,
-				ctx->properties);
+			int compressed_size = simple_lzma_compress (strm->next_in, input_size, ctx->compress_buffer, ctx->compress_buffer_size, ctx->properties);
 			(void)0;
 			if (compressed_size <= 0) {
 				return Z_DATA_ERROR;
@@ -331,17 +323,14 @@ int lzmaEnd(z_stream *strm) {
 
 /* --- zlib compatibility layer --- */
 
-int lzmaCompressInit2(z_stream *strm, int level, int windowBits,
-	int memLevel, int strategy) {
+int lzmaCompressInit2(z_stream *strm, int level, int windowBits, int memLevel, int strategy) {
 	(void)windowBits; /* Unused */
 	(void)memLevel; /* Unused */
 	(void)strategy; /* Unused */
 	return lzmaInit (strm, level);
 }
 
-int lzmaCompressInit2_(z_stream *strm, int level, int windowBits,
-	int memLevel, int strategy,
-	const char *version, int stream_size) {
+int lzmaCompressInit2_(z_stream *strm, int level, int windowBits, int memLevel, int strategy, const char *version, int stream_size) {
 	(void)version; /* Unused */
 	(void)stream_size; /* Unused */
 	return lzmaCompressInit2 (strm, level, windowBits, memLevel, strategy);

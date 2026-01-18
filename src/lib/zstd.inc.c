@@ -142,14 +142,10 @@ int zstdDecompress(z_stream *strm, int flush);
 int zstdDecompressEnd(z_stream *strm);
 
 /* Helpers for zlib compatibility layer */
-int zstdCompressInit2(z_stream *strm, int level, int windowBits,
-	int memLevel, int strategy);
+int zstdCompressInit2(z_stream *strm, int level, int windowBits, int memLevel, int strategy);
 int zstdDecompressInit2(z_stream *strm, int windowBits);
-int zstdCompressInit2_(z_stream *strm, int level, int windowBits,
-	int memLevel, int strategy,
-	const char *version, int stream_size);
-int zstdDecompressInit2_(z_stream *strm, int windowBits,
-	const char *version, int stream_size);
+int zstdCompressInit2_(z_stream *strm, int level, int windowBits, int memLevel, int strategy, const char *version, int stream_size);
+int zstdDecompressInit2_(z_stream *strm, int windowBits, const char *version, int stream_size);
 
 #ifdef __cplusplus
 }
@@ -173,9 +169,7 @@ static uint32_t read_le32(const void *ptr) {
  * NOTE: For minimalistic implementation, we don't actually compress;
  * returning 0 signals to use raw blocks instead. This avoids issues
  * with RLE schemes that conflict with raw data patterns. */
-static int compress_block(const uint8_t *src, size_t src_size,
-	uint8_t *dst, size_t dst_capacity,
-	int level) {
+static int compress_block(const uint8_t *src, size_t src_size, uint8_t *dst, size_t dst_capacity, int level) {
 	(void)src; /* Unused in this minimal implementation */
 	(void)src_size; /* Unused */
 	(void)dst; /* Unused - we don't compress */
@@ -191,8 +185,7 @@ static int compress_block(const uint8_t *src, size_t src_size,
  * NOTE: Since we don't actually compress blocks (always using raw blocks),
  * this function won't be called in normal operation. However, we keep it
  * as a placeholder for potential future use. For now, just copy the data. */
-static int decompress_block(const uint8_t *src, size_t src_size,
-	uint8_t *dst, size_t dst_capacity) {
+static int decompress_block(const uint8_t *src, size_t src_size, uint8_t *dst, size_t dst_capacity) {
 	if (src_size == 0 || !src || !dst) {
 		return 0; /* Empty input or invalid pointers */
 	}
@@ -325,9 +318,7 @@ int zstdCompress(z_stream *strm, int flush) {
 		/* Try to compress the block */
 		int compressed_size = 0;
 		if (block_size > 0) {
-			compressed_size = compress_block (strm->next_in, block_size,
-				ctx->compress_buffer, ctx->compress_buffer_size,
-				ctx->compression_level);
+			compressed_size = compress_block (strm->next_in, block_size, ctx->compress_buffer, ctx->compress_buffer_size, ctx->compression_level);
 		}
 
 		/* Decide whether to write compressed or raw block */
@@ -379,7 +370,7 @@ int zstdCompress(z_stream *strm, int flush) {
 		if (block_size > 0) {
 			/* Save source pointer before advancing */
 			const uint8_t *src = strm->next_in;
-			
+
 			strm->next_in += block_size;
 			strm->avail_in -= block_size;
 			strm->total_in += block_size;
@@ -651,8 +642,7 @@ int zstdDecompress(z_stream *strm, int flush) {
 
 				/* Decompress the block */
 				int decompressed_size = decompress_block (
-					strm->next_in, block_size,
-					ctx->decompress_buffer, ctx->decompress_buffer_size);
+					strm->next_in, block_size, ctx->decompress_buffer, ctx->decompress_buffer_size);
 
 				if (decompressed_size <= 0) {
 					return Z_DATA_ERROR;
@@ -738,8 +728,7 @@ int zstdDecompressEnd(z_stream *strm) {
 
 /* --- zlib compatibility layer --- */
 
-int zstdCompressInit2(z_stream *strm, int level, int windowBits,
-	int memLevel, int strategy) {
+int zstdCompressInit2(z_stream *strm, int level, int windowBits, int memLevel, int strategy) {
 	(void)windowBits; /* Unused */
 	(void)memLevel; /* Unused */
 	(void)strategy; /* Unused */
@@ -751,16 +740,13 @@ int zstdDecompressInit2(z_stream *strm, int windowBits) {
 	return zstdDecompressInit (strm);
 }
 
-int zstdCompressInit2_(z_stream *strm, int level, int windowBits,
-	int memLevel, int strategy,
-	const char *version, int stream_size) {
+int zstdCompressInit2_(z_stream *strm, int level, int windowBits, int memLevel, int strategy, const char *version, int stream_size) {
 	(void)version; /* Unused */
 	(void)stream_size; /* Unused */
 	return zstdCompressInit2 (strm, level, windowBits, memLevel, strategy);
 }
 
-int zstdDecompressInit2_(z_stream *strm, int windowBits,
-	const char *version, int stream_size) {
+int zstdDecompressInit2_(z_stream *strm, int windowBits, const char *version, int stream_size) {
 	(void)version; /* Unused */
 	(void)stream_size; /* Unused */
 	return zstdDecompressInit2 (strm, windowBits);

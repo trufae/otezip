@@ -6,7 +6,7 @@ int main() {
 	uint8_t hello[] = "hello
 			";
 		uint8_t *
-			compressed;
+		compressed;
 	uint32_t comp_size;
 	otezip_compress_data (hello, 6, &compressed, &comp_size, OTEZIP_METHOD_DEFLATE);
 	printf ("Original: %s", hello);

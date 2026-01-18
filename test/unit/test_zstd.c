@@ -136,7 +136,8 @@ int test_zstd_large_data() {
 	zstdEnd (&c_strm);
 
 	printf ("Large test: Original size: %zu bytes, Compressed size: %zu bytes\n",
-		test_size, compressed_len);
+		test_size,
+		compressed_len);
 
 	/* Decompress */
 	z_stream d_strm = { 0 };

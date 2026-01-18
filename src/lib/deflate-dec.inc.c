@@ -2,10 +2,10 @@
 
 /* Wrapper format types */
 typedef enum {
-	WRAP_NONE = 0,   /* Raw deflate */
-	WRAP_ZLIB = 1,   /* zlib header */
-	WRAP_GZIP = 2,   /* gzip header */
-	WRAP_AUTO = 3    /* Auto-detect zlib or gzip */
+	WRAP_NONE = 0, /* Raw deflate */
+	WRAP_ZLIB = 1, /* zlib header */
+	WRAP_GZIP = 2, /* gzip header */
+	WRAP_AUTO = 3 /* Auto-detect zlib or gzip */
 } wrap_format;
 
 /* Internal state for inflate */
@@ -199,7 +199,9 @@ static int read_dynamic_huffman(z_stream *strm, inflate_state *state) {
 		/* Process code */
 		if (code < 16) {
 			/* Literal code length */
-			if (index >= LL_LENGTHS_MAX) return Z_DATA_ERROR;
+			if (index >= LL_LENGTHS_MAX) {
+				return Z_DATA_ERROR;
+			}
 			ll_lengths[index++] = code;
 		} else {
 			/* Repeat code */
@@ -352,10 +354,10 @@ static void init_fixed_huffman(inflate_state *state) {
 /* ----------- Main decoder API functions ----------- */
 
 /* Gzip header flags */
-#define GZIP_FTEXT    0x01
-#define GZIP_FHCRC    0x02
-#define GZIP_FEXTRA   0x04
-#define GZIP_FNAME    0x08
+#define GZIP_FTEXT 0x01
+#define GZIP_FHCRC 0x02
+#define GZIP_FEXTRA 0x04
+#define GZIP_FNAME 0x08
 #define GZIP_FCOMMENT 0x10
 
 /* Skip gzip header, returns bytes consumed or -1 on error */
@@ -372,7 +374,7 @@ static int skip_gzip_header(const uint8_t *buf, size_t len) {
 		return -1;
 	}
 	uint8_t flags = buf[3];
-	/* Skip: flags(1), mtime(4), xfl(1), os(1) = 7 bytes after magic+method */
+	/* Skip: flags (1), mtime (4), xfl (1), os (1) = 7 bytes after magic+method */
 	size_t pos = 10;
 
 	/* Skip extra field if present */
@@ -522,14 +524,14 @@ int inflateInit2(z_stream *strm, int windowBits) {
 static int do_copy_from_window(z_stream *strm, inflate_state *state, int length, int distance) {
 	/* Copy as many bytes as we can */
 	while (length > 0 && strm->avail_out > 0) {
-		uint8_t byte = state->window[(state->window_pos - distance) & (state->window_size - 1)];
+		uint8_t byte = state->window[(state->window_pos - distance) &(state->window_size - 1)];
 		*strm->next_out++ = byte;
 		strm->avail_out--;
 		strm->total_out++;
 
 		/* Add to window */
 		state->window[state->window_pos] = byte;
-		state->window_pos = (state->window_pos + 1) & (state->window_size - 1);
+		state->window_pos = (state->window_pos + 1) &(state->window_size - 1);
 		length--;
 	}
 
@@ -594,7 +596,7 @@ int inflate(z_stream *strm, int flush) {
 		strm->total_out++;
 		/* Add to window */
 		state->window[state->window_pos] = (uint8_t)state->pending_literal;
-		state->window_pos = (state->window_pos + 1) & (state->window_size - 1);
+		state->window_pos = (state->window_pos + 1) &(state->window_size - 1);
 		state->pending_literal = -1;
 	}
 

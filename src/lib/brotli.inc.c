@@ -38,8 +38,7 @@ static uint32_t my_crc32(const uint8_t *data, size_t len, uint32_t crc) {
 	return ~crc;
 }
 
-static size_t simple_compress(const uint8_t *input, size_t input_len,
-	uint8_t *output, size_t output_len) {
+static size_t simple_compress(const uint8_t *input, size_t input_len, uint8_t *output, size_t output_len) {
 	if (output_len < input_len + 8) {
 		return 0;
 	}
@@ -54,8 +53,7 @@ static size_t simple_compress(const uint8_t *input, size_t input_len,
 	return (size_t) (5 + 8 + 4 + input_len);
 }
 
-static size_t simple_decompress(const uint8_t *input, size_t input_len,
-	uint8_t *output, size_t output_len) {
+static size_t simple_decompress(const uint8_t *input, size_t input_len, uint8_t *output, size_t output_len) {
 	if (input_len < 5 + sizeof (size_t) + sizeof (uint32_t)) {
 		return 0;
 	}
@@ -103,8 +101,7 @@ int brotliCompress(z_stream *strm, int flush) {
 	}
 	if (flush == Z_FINISH) {
 		size_t compressed_size = simple_compress (
-			strm->next_in, strm->avail_in,
-			strm->next_out, strm->avail_out);
+			strm->next_in, strm->avail_in, strm->next_out, strm->avail_out);
 		if (compressed_size == 0) {
 			return Z_BUF_ERROR;
 		}
@@ -159,8 +156,7 @@ int brotliDecompress(z_stream *strm, int flush) {
 		return Z_STREAM_ERROR;
 	}
 	size_t decompressed_size = simple_decompress (
-		strm->next_in, strm->avail_in,
-		strm->next_out, strm->avail_out);
+		strm->next_in, strm->avail_in, strm->next_out, strm->avail_out);
 	if (decompressed_size == 0) {
 		if (strm->avail_in >= 5 + 8) {
 			uint64_t stored_len_tmp = otezip_read_le64 (strm->next_in + 5);

@@ -91,10 +91,8 @@ int inflateInit2_(z_stream *strm, int windowBits, const char *version, int strea
 int inflate(z_stream *strm, int flush);
 int inflateEnd(z_stream *strm);
 
-int deflateInit2(z_stream *strm, int level, int method, int windowBits,
-	int memLevel, int strategy);
-int deflateInit2_(z_stream *strm, int level, int method, int windowBits,
-	int memLevel, int strategy, const char *version, int stream_size);
+int deflateInit2(z_stream *strm, int level, int method, int windowBits, int memLevel, int strategy);
+int deflateInit2_(z_stream *strm, int level, int method, int windowBits, int memLevel, int strategy, const char *version, int stream_size);
 int deflate(z_stream *strm, int flush);
 int deflateEnd(z_stream *strm);
 
