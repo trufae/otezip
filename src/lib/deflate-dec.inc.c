@@ -199,9 +199,6 @@ static int read_dynamic_huffman(z_stream *strm, inflate_state *state) {
 		/* Process code */
 		if (code < 16) {
 			/* Literal code length */
-			if (index >= LL_LENGTHS_MAX) {
-				return Z_DATA_ERROR;
-			}
 			ll_lengths[index++] = code;
 		} else {
 			/* Repeat code */

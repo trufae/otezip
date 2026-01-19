@@ -218,11 +218,6 @@ static long otezip_find_eocd(FILE *fp, uint8_t *eocd_out /*22+*/, size_t *cd_siz
 	if (otezip_read_fully (fp, buf, search_len) != 0) {
 		return OTEZIP_ERR_READ;
 	}
-	/* Ensure search_len is at least 22 to avoid underflow in the loop below
-	 * and out-of-bounds access in subsequent buffer reads. */
-	if (search_len < 22) {
-		return OTEZIP_ERR_INCONS;
-	}
 	size_t i;
 	for (i = search_len - 22; i != (size_t)-1; --i) {
 		if (otezip_rd32 (buf + i) == OTEZIP_SIG_EOCD) {
@@ -1021,7 +1016,8 @@ static int otezip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_b
 #ifdef OTEZIP_ENABLE_BROTLI
 	if (*method == OTEZIP_METHOD_BROTLI) {
 		/* Brotli compression (using vendored upstream implementation via wrappers) */
-		size_t out_cap = (in_size? (in_size * 2 + 64): 128);
+		/* in_size > 0 here since zero-size case is handled at function start */
+		size_t out_cap = in_size * 2 + 64;
 		*out_buf = (uint8_t *)malloc (out_cap);
 		if (!*out_buf) {
 			return -1;
