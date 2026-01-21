@@ -171,8 +171,8 @@ static uint16_t otezip_rd16(const uint8_t *p) {
 	return (uint16_t) (p[0] | (p[1] << 8));
 }
 static uint32_t otezip_rd32(const uint8_t *p) {
-	return (uint32_t) (p[0] | (p[1] << 8) |
-		(p[2] << 16) | (p[3] << 24));
+	return (uint32_t) ((unsigned int)p[0] | ((unsigned int)p[1] << 8) |
+		((unsigned int)p[2] << 16) | ((unsigned int)p[3] << 24));
 }
 static void otezip_wr16(uint8_t *p, uint16_t v) {
 	p[0] = (uint8_t) (v & 0xFF);
