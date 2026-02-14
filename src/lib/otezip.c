@@ -316,8 +316,8 @@ static int otezip_load_central(zip_t *za) {
 		return OTEZIP_ERR_READ;
 	}
 
-	/* Validate number of entries is reasonable */
-	if (n_entries == 0) {
+	/* Validate number of entries is reasonable (max ~1.4M entries fits in cd_size) */
+	if (n_entries == 0 || (size_t)n_entries * 46 > cd_size) {
 		free (cd_buf);
 		return OTEZIP_ERR_INCONS;
 	}
@@ -369,16 +369,15 @@ static int otezip_load_central(zip_t *za) {
 		}
 		e->external_attr = otezip_rd32 (h + 38);
 
+		/* Validate filename fits in buffer before allocating */
+		if ((size_t)(46 + filename_len) > cd_size - off) {
+			free (cd_buf);
+			return OTEZIP_ERR_INCONS;
+		}
 		e->name = (char *)malloc (filename_len + 1u);
 		if (!e->name) {
 			free (cd_buf);
 			return OTEZIP_ERR_READ;
-		}
-		/* Ensure the filename bytes are within the central directory buffer */
-		if ((size_t) (46 + filename_len) > cd_size - off) {
-			free (e->name);
-			free (cd_buf);
-			return OTEZIP_ERR_INCONS;
 		}
 		memcpy (e->name, h + 46, filename_len);
 		e->name[filename_len] = '\0';
@@ -467,7 +466,7 @@ static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out
 	}
 
 	/* read compressed data */
-	uint8_t *cbuf = (uint8_t *)malloc ((size_t)e->comp_size? (size_t)e->comp_size: 1);
+	uint8_t *cbuf = (uint8_t *)calloc (e->comp_size ? e->comp_size : 1, 1);
 	if (!cbuf) {
 		return -1;
 	}
@@ -478,13 +477,8 @@ static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out
 
 	uint8_t *ubuf;
 #ifdef OTEZIP_ENABLE_STORE
-	if (e->method == OTEZIP_METHOD_STORE) { /* stored – nothing to inflate */
+	if (e->method == OTEZIP_METHOD_STORE) {
 		ubuf = cbuf;
-		/* Ensure cbuf is properly initialized for STORE method */
-		if (e->comp_size > 0 && e->comp_size < e->uncomp_size) {
-			/* For STORE method with different sizes, zero the remaining part */
-			memset (ubuf + e->comp_size, 0, e->uncomp_size - e->comp_size);
-		}
 	}
 #endif
 #ifdef OTEZIP_ENABLE_DEFLATE
