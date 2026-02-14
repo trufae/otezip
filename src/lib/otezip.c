@@ -348,9 +348,12 @@ static int otezip_load_central(zip_t *za) {
 		uint16_t filename_len = otezip_rd16 (h + 28);
 		uint16_t extra_len = otezip_rd16 (h + 30);
 		uint16_t comment_len = otezip_rd16 (h + 32);
+		size_t entry_size = 46 + (size_t)filename_len + (size_t)extra_len + (size_t)comment_len;
 
-		/* Field lengths are 16-bit per spec; further validation occurs when
-		 * advancing offsets and allocating memory below. */
+		if (entry_size > cd_size - off) {
+			free (cd_buf);
+			return OTEZIP_ERR_INCONS;
+		}
 
 		struct otezip_entry *e = &za->entries[i];
 		e->method = otezip_rd16 (h + 10);
@@ -360,20 +363,13 @@ static int otezip_load_central(zip_t *za) {
 		e->comp_size = otezip_rd32 (h + 20);
 		e->uncomp_size = otezip_rd32 (h + 24);
 		e->local_hdr_ofs = otezip_rd32 (h + 42);
+		e->external_attr = otezip_rd32 (h + 38);
 
-		/* Reject entries with absurdly large sizes to avoid allocating
-		 * more than our allowed maximum. */
 		if ((uint64_t)e->comp_size > OTEZIP_MAX_PAYLOAD || (uint64_t)e->uncomp_size > OTEZIP_MAX_PAYLOAD) {
 			free (cd_buf);
 			return OTEZIP_ERR_INCONS;
 		}
-		e->external_attr = otezip_rd32 (h + 38);
 
-		/* Validate filename fits in buffer before allocating */
-		if ((size_t)(46 + filename_len) > cd_size - off) {
-			free (cd_buf);
-			return OTEZIP_ERR_INCONS;
-		}
 		e->name = (char *)malloc (filename_len + 1u);
 		if (!e->name) {
 			free (cd_buf);
@@ -381,14 +377,7 @@ static int otezip_load_central(zip_t *za) {
 		}
 		memcpy (e->name, h + 46, filename_len);
 		e->name[filename_len] = '\0';
-
-		/* Safely advance offset, checking for overflow and bounds */
-		uint64_t advance = 46 + (uint64_t)filename_len + (uint64_t)extra_len + (uint64_t)comment_len;
-		if (advance > (uint64_t)cd_size - off) {
-			free (cd_buf);
-			return OTEZIP_ERR_INCONS;
-		}
-		off += (size_t)advance;
+		off += entry_size;
 	}
 	free (cd_buf);
 	return 0;
