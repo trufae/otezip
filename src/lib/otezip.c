@@ -467,6 +467,10 @@ static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out
 	uint8_t *ubuf;
 #ifdef OTEZIP_ENABLE_STORE
 	if (e->method == OTEZIP_METHOD_STORE) {
+		if (e->comp_size != e->uncomp_size) {
+			free (cbuf);
+			return -1;
+		}
 		ubuf = cbuf;
 	}
 #endif
