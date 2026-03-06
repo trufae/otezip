@@ -3,7 +3,6 @@
 tmp
 ./*.zip
 ./*.bin
-test/unit/test_*
 test/simple_test
 test/verify_deflate
 *.a
