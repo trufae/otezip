@@ -39,7 +39,8 @@ static uint32_t my_crc32(const uint8_t *data, size_t len, uint32_t crc) {
 }
 
 static size_t simple_compress(const uint8_t *input, size_t input_len, uint8_t *output, size_t output_len) {
-	if (output_len < input_len + 8) {
+	const size_t header_size = 5 + 8 + 4;
+	if (output_len < header_size || input_len > output_len - header_size) {
 		return 0;
 	}
 	memcpy (output, "BROT", 4);
@@ -54,7 +55,7 @@ static size_t simple_compress(const uint8_t *input, size_t input_len, uint8_t *o
 }
 
 static size_t simple_decompress(const uint8_t *input, size_t input_len, uint8_t *output, size_t output_len) {
-	if (input_len < 5 + sizeof (size_t) + sizeof (uint32_t)) {
+	if (input_len < 5 + 8 + 4) {
 		return 0;
 	}
 	if (memcmp (input, "BROT", 4) != 0) {
@@ -69,7 +70,7 @@ static size_t simple_decompress(const uint8_t *input, size_t input_len, uint8_t 
 		return 0;
 	}
 	uint32_t stored_crc = otezip_read_le32 (input + 5 + 8);
-	const uint8_t *data = input + 5 + sizeof (size_t) + sizeof (uint32_t);
+	const uint8_t *data = input + 5 + 8 + 4;
 	uint32_t computed_crc = my_crc32 (data, stored_len, 0);
 	if (stored_crc != computed_crc) {
 		return 0;
