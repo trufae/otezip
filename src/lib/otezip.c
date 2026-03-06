@@ -60,6 +60,43 @@ static int otezip_mkstemp(const char *prefix) {
 #include "../include/otezip/zstream.h"
 #include "time.inc.c"
 
+struct otezip_entry {
+	char *name;
+	uint32_t local_hdr_ofs;
+	uint32_t comp_size;
+	uint32_t uncomp_size;
+	uint16_t method;
+	uint32_t crc32;
+	uint16_t file_time;
+	uint16_t file_date;
+	uint32_t external_attr;
+	const void *pending_buf;
+	zip_uint64_t pending_len;
+	int pending_freep;
+	int dirty;
+};
+
+struct zip {
+	FILE *fp;
+	struct otezip_entry *entries;
+	zip_uint64_t n_entries;
+	int mode;
+	zip_uint64_t next_index;
+	uint16_t default_method;
+};
+
+struct zip_file {
+	uint8_t *data;
+	uint32_t size;
+	zip_uint64_t pos;
+};
+
+struct zip_source {
+	const void *buf;
+	zip_uint64_t len;
+	int freep;
+};
+
 #if defined(_WIN32) || defined(_WIN64)
 /* Ensure we have thread-safe fallback for localtime on Windows builds */
 #include <time.h>
@@ -106,6 +143,10 @@ static uint32_t otezip_write_local_header(FILE *fp, const char *name, uint32_t c
 static uint32_t otezip_write_central_header(FILE *fp, const char *name, uint32_t comp_method, uint32_t comp_size, uint32_t uncomp_size, uint32_t crc32, uint32_t local_header_offset, uint16_t file_time, uint16_t file_date, uint32_t external_attr);
 static void otezip_write_end_of_central_directory(FILE *fp, uint32_t num_entries, uint32_t central_dir_size, uint32_t central_dir_offset);
 static int otezip_finalize_archive(zip_t *za);
+static int otezip_is_valid(const zip_t *za);
+static int otezip_compress_data(uint8_t *in_buf, size_t in_size, uint8_t **out_buf, uint32_t *out_size, uint16_t *method);
+static void otezip_discard_pending_source(struct otezip_entry *e);
+static int otezip_materialize_entry(zip_t *za, struct otezip_entry *e);
 
 /* Helper function to get compression method ID from string name.
  * Returns the OTEZIP_METHOD_* value or -1 if invalid/not supported. */
@@ -683,6 +724,53 @@ static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out
 	return 0;
 }
 
+static void otezip_discard_pending_source(struct otezip_entry *e) {
+	if (!e) {
+		return;
+	}
+	if (e->pending_freep && e->pending_buf) {
+		free ((void *)e->pending_buf);
+	}
+	e->pending_buf = NULL;
+	e->pending_len = 0;
+	e->pending_freep = 0;
+	e->dirty = 0;
+}
+
+static int otezip_materialize_entry(zip_t *za, struct otezip_entry *e) {
+	if (!otezip_is_valid (za) || !e || !e->dirty) {
+		return 0;
+	}
+	if (e->pending_len > OTEZIP_MAX_PAYLOAD || e->pending_len > (zip_uint64_t)UINT32_MAX) {
+		return -1;
+	}
+
+	long current_pos = ftell (za->fp);
+	if (current_pos < 0 || (uint64_t)current_pos > (uint64_t)UINT32_MAX) {
+		return -1;
+	}
+	e->local_hdr_ofs = (uint32_t)current_pos;
+	e->uncomp_size = (uint32_t)e->pending_len;
+	e->crc32 = otezip_crc32 (0, e->pending_buf, e->pending_len);
+
+	uint8_t *comp_buf = NULL;
+	uint32_t comp_size = 0;
+	if (otezip_compress_data ((uint8_t *)e->pending_buf, e->pending_len, &comp_buf, &comp_size, &e->method) != 0) {
+		return -1;
+	}
+	if ((uint64_t)comp_size > OTEZIP_MAX_PAYLOAD) {
+		free (comp_buf);
+		return -1;
+	}
+	e->comp_size = comp_size;
+
+	otezip_write_local_header (za->fp, e->name, e->method, e->comp_size, e->uncomp_size, e->crc32);
+	fwrite (comp_buf, 1, comp_size, za->fp);
+	free (comp_buf);
+	otezip_discard_pending_source (e);
+	return 0;
+}
+
 /* Helper function to validate archive state */
 static int otezip_is_valid(const zip_t *za) {
 	return (za != NULL && za->fp != NULL);
@@ -1128,50 +1216,10 @@ zip_int64_t zip_file_add(zip_t *za, const char *name, zip_source_t *src, zip_fla
 
 	/* Set default permissions: 0644 for files */
 	e->external_attr = 0100644 << 16; /* S_IFREG | 0644 << 16 */
-
-	/* Get current position for local header offset */
-	long current_pos = ftell (za->fp);
-	if (current_pos < 0) {
-		free (e->name);
-		return -1;
-	}
-
-	/* Ensure local header offset fits into ZIP 32-bit field */
-	if ((uint64_t)current_pos > (uint64_t)UINT32_MAX) {
-		free (e->name);
-		return -1;
-	}
-	e->local_hdr_ofs = (uint32_t)current_pos;
-
-	/* Compress the data using the selected method */
-	uint8_t *comp_buf = NULL;
-	uint32_t comp_size = 0;
-
-	/* Compress the data using the selected method */
-	if (otezip_compress_data ((uint8_t *)src->buf, src->len, &comp_buf, &comp_size, &e->method) != 0) {
-		free (e->name);
-		return -1;
-	}
-
-	/* Validate compressed size too */
-	if ((uint64_t)comp_size > OTEZIP_MAX_PAYLOAD) {
-		free (e->name);
-		free (comp_buf);
-		return -1;
-	}
-	e->comp_size = comp_size;
-
-	/* Write local file header */
-	otezip_write_local_header (za->fp, e->name, e->method, e->comp_size, e->uncomp_size, e->crc32);
-
-	/* Write compressed data */
-	fwrite (comp_buf, 1, comp_size, za->fp);
-	free (comp_buf);
-
-	/* Free source data if requested */
-	if (src->freep) {
-		free ((void *)src->buf);
-	}
+	e->pending_buf = src->buf;
+	e->pending_len = src->len;
+	e->pending_freep = src->freep;
+	e->dirty = 1;
 	free (src);
 
 	/* Increment entry count */
@@ -1231,8 +1279,19 @@ int zip_set_file_compression(zip_t *za, zip_uint64_t index, zip_int32_t comp, zi
 		return -1;
 	}
 
-	/* Set the method for next files that will be added */
-	za->entries[index].method = (uint16_t)comp;
+	struct otezip_entry *e = &za->entries[index];
+	if (!e->dirty) {
+		uint8_t *buf = NULL;
+		uint32_t sz = 0;
+		if (otezip_extract_entry (za, e, &buf, &sz) != 0) {
+			return -1;
+		}
+		e->pending_buf = buf;
+		e->pending_len = sz;
+		e->pending_freep = 1;
+		e->dirty = 1;
+	}
+	e->method = (uint16_t)comp;
 	return 0;
 }
 
@@ -1240,6 +1299,14 @@ int zip_set_file_compression(zip_t *za, zip_uint64_t index, zip_int32_t comp, zi
 static int otezip_finalize_archive(zip_t *za) {
 	if (!otezip_is_valid (za) || !za->fp || za->mode != 1) {
 		return -1;
+	}
+	if (fseek (za->fp, 0, SEEK_END) != 0) {
+		return -1;
+	}
+	for (zip_uint64_t i = 0; i < za->n_entries; i++) {
+		if (otezip_materialize_entry (za, &za->entries[i]) != 0) {
+			return -1;
+		}
 	}
 	/* Get offset for central directory */
 	long cd_offset = ftell (za->fp);
@@ -1276,8 +1343,9 @@ int zip_close(zip_t *za) {
 		return -1;
 	}
 	/* Finalize archive if in write mode */
+	int rc = 0;
 	if (za->mode == 1) {
-		otezip_finalize_archive (za);
+		rc = otezip_finalize_archive (za);
 	}
 
 	if (za->fp) {
@@ -1285,13 +1353,14 @@ int zip_close(zip_t *za) {
 	}
 	zip_uint64_t i;
 	for (i = 0; i < za->n_entries; i++) {
+		otezip_discard_pending_source (&za->entries[i]);
 		if (za->entries[i].name) {
 			free (za->entries[i].name);
 		}
 	}
 	free (za->entries);
 	free (za);
-	return 0;
+	return rc;
 }
 
 zip_uint64_t zip_get_num_files(zip_t *za) {
@@ -1319,7 +1388,17 @@ zip_file_t *zip_fopen_index(zip_t *za, zip_uint64_t index, zip_flags_t flags) {
 	}
 	uint8_t *buf = NULL;
 	uint32_t sz = 0;
-	if (otezip_extract_entry (za, &za->entries[index], &buf, &sz) != 0) {
+	struct otezip_entry *e = &za->entries[index];
+	if (e->dirty) {
+		sz = (uint32_t)e->pending_len;
+		buf = (uint8_t *)malloc (sz ? sz : 1u);
+		if (!buf) {
+			return NULL;
+		}
+		if (sz > 0) {
+			memcpy (buf, e->pending_buf, sz);
+		}
+	} else if (otezip_extract_entry (za, e, &buf, &sz) != 0) {
 		return NULL;
 	}
 	zip_file_t *zf = (zip_file_t *)malloc (sizeof (zip_file_t));
@@ -1603,6 +1682,18 @@ zip_source_t *zip_source_buffer_create(const void *data, zip_uint64_t len, int f
 	return zip_source_buffer (NULL, data, len, freep);
 }
 
+int zip_file_get_external_attributes(zip_t *za, zip_uint64_t index, zip_flags_t flags, zip_uint8_t *opsys, zip_uint32_t *attributesp) {
+	(void)flags;
+	if (!otezip_is_valid (za) || index >= za->n_entries || !attributesp) {
+		return -1;
+	}
+	if (opsys) {
+		*opsys = 3;
+	}
+	*attributesp = za->entries[index].external_attr;
+	return 0;
+}
+
 void zip_source_free(zip_source_t *src) {
 	if (!src) {
 		return;
@@ -1622,30 +1713,19 @@ static int otezip_replace_entry_data(zip_t *za, zip_uint64_t index, zip_source_t
 		return -1;
 	}
 	struct otezip_entry *e = &za->entries[index];
+	if ((uint64_t)src->len > OTEZIP_MAX_PAYLOAD || (uint64_t)src->len > (uint64_t)UINT32_MAX) {
+		return -1;
+	}
+	otezip_discard_pending_source (e);
 	/* Update entry with new source data */
 	e->uncomp_size = (uint32_t)src->len;
 	e->crc32 = otezip_crc32 (0, src->buf, src->len);
-	/* Compress the data using the selected method */
-	uint8_t *comp_buf = NULL;
-	uint32_t comp_size = 0;
-	if (otezip_compress_data ((uint8_t *)src->buf, src->len, &comp_buf, &comp_size, &e->method) != 0) {
-		return -1;
-	}
-	if ((uint64_t)comp_size > OTEZIP_MAX_PAYLOAD) {
-		free (comp_buf);
-		return -1;
-	}
-	e->comp_size = comp_size;
-	/* Write the updated entry */
-	long current_pos = ftell (za->fp);
-	if (current_pos < 0) {
-		free (comp_buf);
-		return -1;
-	}
-	e->local_hdr_ofs = (uint32_t)current_pos;
-	otezip_write_local_header (za->fp, e->name, e->method, e->comp_size, e->uncomp_size, e->crc32);
-	fwrite (comp_buf, 1, comp_size, za->fp);
-	free (comp_buf);
+	otezip_get_dostime (&e->file_time, &e->file_date);
+	e->pending_buf = src->buf;
+	e->pending_len = src->len;
+	e->pending_freep = src->freep;
+	e->dirty = 1;
+	free (src);
 	return 0;
 }
 

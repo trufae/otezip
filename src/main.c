@@ -150,9 +150,7 @@ static int list_files(const char *path) {
 
 	zip_uint64_t n = zip_get_num_files (za);
 	for (zip_uint64_t i = 0; i < n; ++i) {
-		const char *name = NULL; /* we only have names in directory entries */
-		/* mzip stores names inside entries array – expose via zip_name_locate */
-		name = ((struct otezip_entry *)za->entries)[i].name; /* hack – internal */
+		const char *name = zip_get_name (za, i, 0);
 		printf ("%3llu  %s\n", (unsigned long long)i, name? name: "<unknown>");
 	}
 
@@ -169,12 +167,6 @@ static int create_or_add_files(const char *path, char **files, int num_files, in
 	if (!za) {
 		fprintf (stderr, "Failed to %s %s (err=%d)\n", create_mode? "create": "open", path, err);
 		return 1;
-	}
-
-	/* Modify next entry to add to use specified compression method */
-	if (compression_method != 0) {
-		/* For this mzip structure, store the compression method in the archive */
-		((struct zip *)za)->default_method = compression_method;
 	}
 
 	for (int i = 0; i < num_files; i++) {
@@ -236,9 +228,10 @@ static int create_or_add_files(const char *path, char **files, int num_files, in
 			/* Source buffer is already freed in case of failure */
 			continue;
 		}
-
-		/* Compression method is already applied via default_method before add.
-		 * Avoid changing per-entry method post-facto to prevent header mismatch */
+		if (compression_method != 0 && zip_set_file_compression (za, (zip_uint64_t)idx, compression_method, 0) != 0) {
+			fprintf (stderr, "Failed to set compression for: %s\n", filename);
+			continue;
+		}
 
 		printf ("Added: %s (%ld bytes)\n", base_name, file_size);
 	}
@@ -423,13 +416,18 @@ static int extract_all(const char *path) {
 
 	zip_uint64_t n = zip_get_num_files (za);
 	for (zip_uint64_t i = 0; i < n; ++i) {
+		const char *raw_name = zip_get_name (za, i, 0);
+		if (!raw_name) {
+			fprintf (stderr, "Could not get name for entry %llu\n", (unsigned long long)i);
+			continue;
+		}
+
 		zip_file_t *zf = zip_fopen_index (za, i, 0);
 		if (!zf) {
 			fprintf (stderr, "Could not read entry %llu\n", (unsigned long long)i);
 			continue;
 		}
 
-		const char *raw_name = ((struct otezip_entry *)za->entries)[i].name; /* internal */
 		char fname_sanitized[PATH_MAX];
 		if (sanitize_extract_path (raw_name, fname_sanitized, sizeof (fname_sanitized)) != 0) {
 			fprintf (stderr, "Skipping suspicious entry: %s\n", raw_name? raw_name: "(null)");
@@ -476,9 +474,9 @@ static int extract_all(const char *path) {
 		/* Determine safe mode from central directory external attributes.
 		 * Mask to 0777 to avoid applying SUID/SGID/sticky from archive. */
 		uint32_t external_attr = 0;
-		/* access internal entry data safely */
-		struct otezip_entry *entry = &((struct otezip_entry *)za->entries)[i];
-		external_attr = entry->external_attr;
+		if (zip_file_get_external_attributes (za, i, 0, NULL, &external_attr) != 0) {
+			external_attr = 0;
+		}
 		mode_t desired_mode = (mode_t) ((external_attr >> 16) & 0777);
 		if (desired_mode == 0) {
 			desired_mode = 0644; /* fallback */
@@ -539,27 +537,41 @@ static int extract_all(const char *path) {
 		}
 
 		/* Write the file content */
-		ssize_t wrote = 0;
-		const uint8_t *data = (const uint8_t *)zf->data;
-		size_t remain = zf->size;
-		while (remain > 0) {
-			ssize_t n = write (fd, data + wrote, remain);
-			if (n < 0) {
+		size_t entry_size = 0;
+		int write_failed = 0;
+		uint8_t buf[8192];
+		for (;;) {
+			zip_int64_t nr = zip_fread (zf, buf, sizeof (buf));
+			if (nr < 0) {
+				fprintf (stderr, "Read error for %s\n", fname_sanitized);
+				write_failed = 1;
+				break;
+			}
+			if (nr == 0) {
+				break;
+			}
+			size_t off = 0;
+			while (off < (size_t)nr) {
+				ssize_t nw = write (fd, buf + off, (size_t)nr - off);
+				if (nw < 0) {
 				if (errno == EINTR) {
 					continue;
 				}
 				fprintf (stderr, "Write error for %s: %s\n", fname_sanitized, strerror (errno));
+				write_failed = 1;
 				break;
 			}
-			wrote += n;
-			remain -= n;
+				off += (size_t)nw;
+				entry_size += (size_t)nw;
+			}
+			if (write_failed) {
+				break;
+			}
 		}
 		close (fd);
 
-		/* Save size before closing – zip_fclose () frees the zip_file_t */
-		size_t entry_size = (size_t)zf->size;
 		zip_fclose (zf);
-		if (remain == 0) {
+		if (!write_failed) {
 			printf ("Extracted %s (%lu bytes)\n", fname_sanitized, (unsigned long)entry_size);
 		} else {
 			fprintf (stderr, "Failed to fully write %s\n", fname_sanitized);

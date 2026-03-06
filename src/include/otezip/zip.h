@@ -74,40 +74,10 @@ typedef uint32_t zip_uint32_t;
 typedef uint16_t zip_uint16_t;
 typedef uint8_t  zip_uint8_t;
 
-/* an in-memory representation of a single directory entry */
-struct otezip_entry {
-    char      *name;                /* zero-terminated filename              */
-    uint32_t   local_hdr_ofs;       /* offset of corresponding LFH          */
-    uint32_t   comp_size;
-    uint32_t   uncomp_size;
-    uint16_t   method;              /* 0=store, 8=deflate                   */
-    uint32_t   crc32;               /* CRC-32 checksum of uncompressed data */
-    uint16_t   file_time;           /* DOS format file time */
-    uint16_t   file_date;           /* DOS format file date */
-    uint32_t   external_attr;       /* External file attributes (permissions) */
-};
-
-/* Use libzip-compatible struct names for full compatibility */
-struct zip {
-    FILE               *fp;
-    struct otezip_entry  *entries;
-    zip_uint64_t        n_entries;
-    int                 mode;       /* 0=read-only, 1=write */
-    zip_uint64_t        next_index; /* Next available index for adding files */
-    uint16_t            default_method; /* Default compression method for new entries */
-};
-
-struct zip_file {
-    uint8_t   *data;   /* complete uncompressed data                 */
-    uint32_t   size;
-    zip_uint64_t pos;  /* current read position for zip_fread       */
-};
-
-struct zip_source {
-    const void *buf;
-    zip_uint64_t len;
-    int freep;
-};
+/* libzip-compatible opaque handles */
+struct zip;
+struct zip_file;
+struct zip_source;
 
 /* Error information structure */
 struct otezip_error {
@@ -203,6 +173,7 @@ zip_int64_t    zip_fread         (zip_file_t *zf, void *buf, zip_uint64_t nbytes
 
 zip_source_t * zip_source_buffer (zip_t *za, const void *data, zip_uint64_t len, int freep);
 zip_source_t * zip_source_buffer_create(const void *data, zip_uint64_t len, int freep, zip_error_t *error);
+int            zip_file_get_external_attributes(zip_t *za, zip_uint64_t index, zip_flags_t flags, zip_uint8_t *opsys, zip_uint32_t *attributesp);
 void           zip_source_free   (zip_source_t *src);
 zip_int64_t    zip_file_add      (zip_t *za, const char *name, zip_source_t *src, zip_flags_t flags);
 int            zip_file_replace  (zip_t *za, zip_uint64_t index, zip_source_t *src, zip_flags_t flags);
