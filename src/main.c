@@ -46,6 +46,15 @@ extern int deflateEnd(z_stream *strm);
 #define O_NOFOLLOW 0
 #endif
 
+/* Ensure O_BINARY is available for binary-safe extraction on Windows. */
+#ifndef O_BINARY
+#ifdef _O_BINARY
+#define O_BINARY _O_BINARY
+#else
+#define O_BINARY 0
+#endif
+#endif
+
 #ifdef _WIN32
 #include <direct.h>
 #include <io.h>
@@ -490,7 +499,7 @@ static int extract_all(const char *path) {
 		 * stdio buffering issues. */
 		int fd = -1;
 		int open_flags = O_WRONLY | O_CREAT | O_EXCL;
-		fd = open (fname_sanitized, open_flags, desired_mode);
+		fd = open (fname_sanitized, open_flags | O_BINARY, desired_mode);
 		if (fd < 0) {
 			if (errno == EEXIST) {
 				if (!g_force) {
@@ -504,7 +513,7 @@ static int extract_all(const char *path) {
 					zip_fclose (zf);
 					continue;
 				}
-				fd = open (fname_sanitized, O_WRONLY | O_TRUNC | O_NOFOLLOW);
+				fd = open (fname_sanitized, O_WRONLY | O_TRUNC | O_NOFOLLOW | O_BINARY);
 				if (fd < 0) {
 					fprintf (stderr, "Cannot open for overwrite %s: %s\n", fname_sanitized, strerror (errno));
 					zip_fclose (zf);
