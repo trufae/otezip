@@ -20,7 +20,7 @@ jobs:
       - name: Build
         run: make
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: build-linux
           path: otezip
@@ -46,7 +46,7 @@ jobs:
       - name: Run tests
         run: make -C test
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: build-macos
           path: otezip
@@ -67,7 +67,7 @@ jobs:
           meson setup build --backend=ninja
           ninja -C build
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: build-windows
           path: build/otezip.exe
