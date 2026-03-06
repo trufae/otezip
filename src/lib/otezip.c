@@ -299,12 +299,24 @@ static int otezip_load_central(zip_t *za) {
 		return OTEZIP_ERR_INCONS;
 	}
 
+	/* A valid empty ZIP may contain only an EOCD record with an empty
+	 * central directory. Accept that case without trying to read or parse
+	 * any central directory entries. */
+	if (n_entries == 0) {
+		if (cd_size != 0) {
+			return OTEZIP_ERR_INCONS;
+		}
+		za->entries = NULL;
+		za->n_entries = 0;
+		return 0;
+	}
+
 	/* read entire central directory */
 	if (fseek (za->fp, cd_ofs, SEEK_SET) != 0) {
 		return OTEZIP_ERR_READ;
 	}
 	/* Validate central directory size isn't unreasonably large */
-	if (cd_size == 0 || cd_size > OTEZIP_MAX_PAYLOAD) {
+	if (cd_size > OTEZIP_MAX_PAYLOAD) {
 		return OTEZIP_ERR_INCONS;
 	}
 	uint8_t *cd_buf = (uint8_t *)malloc (cd_size);
@@ -317,7 +329,7 @@ static int otezip_load_central(zip_t *za) {
 	}
 
 	/* Validate number of entries is reasonable (max ~1.4M entries fits in cd_size) */
-	if (n_entries == 0 || (size_t)n_entries * 46 > cd_size) {
+	if ((size_t)n_entries * 46 > cd_size) {
 		free (cd_buf);
 		return OTEZIP_ERR_INCONS;
 	}
@@ -673,7 +685,7 @@ static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out
 
 /* Helper function to validate archive state */
 static int otezip_is_valid(const zip_t *za) {
-	return (za != NULL && za->entries != NULL);
+	return (za != NULL && za->fp != NULL);
 }
 
 /* --------------  public API implementation  --------------- */
