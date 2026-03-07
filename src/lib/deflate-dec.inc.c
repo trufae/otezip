@@ -762,6 +762,9 @@ int inflate(z_stream *strm, int flush) {
 					if (len > 15 || distance_code < 0) {
 						return Z_DATA_ERROR; /* Invalid Huffman code */
 					}
+					if (distance_code > 29) {
+						return Z_DATA_ERROR; /* Reserved distance codes 30-31 */
+					}
 					/* Convert to actual distance */
 					static const uint16_t dist_base[] = {
 						1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577
