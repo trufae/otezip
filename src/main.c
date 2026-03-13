@@ -584,6 +584,127 @@ static int extract_all(const char *path) {
 	return 0;
 }
 
+/* Inflate (decompress) a buffer with auto-detect gzip/zlib header.
+ * Returns a malloc'd buffer on success (caller frees), NULL on failure.
+ * Sets *out_size to the decompressed size on success. */
+static uint8_t *inflate_buffer(const uint8_t *input_data, size_t input_size, size_t *out_size) {
+	z_stream strm;
+	memset (&strm, 0, sizeof (strm));
+	strm.next_in = (uint8_t *)input_data;
+	strm.avail_in = UINT_CLAMP (input_size);
+
+	if (inflateInit2 (&strm, MAX_WBITS + 32) != Z_OK) {
+		fprintf (stderr, "inflateInit2 failed\n");
+		return NULL;
+	}
+
+	size_t alloc = input_size * 4;
+	if (alloc < 65536) {
+		alloc = 65536;
+	}
+	uint8_t *buf = (uint8_t *)malloc (alloc);
+	if (!buf) {
+		fprintf (stderr, "Out of memory for output buffer\n");
+		inflateEnd (&strm);
+		return NULL;
+	}
+
+	strm.next_out = buf;
+	strm.avail_out = UINT_CLAMP (alloc);
+	int ok = 0;
+
+	while (1) {
+		int ret = inflate (&strm, Z_NO_FLUSH);
+		if (ret == Z_STREAM_END) {
+			ok = 1;
+			break;
+		}
+		if (ret == Z_BUF_ERROR) {
+			if (strm.avail_in == 0) {
+				size_t consumed = (size_t)(strm.next_in - input_data);
+				if (consumed < input_size) {
+					strm.avail_in = UINT_CLAMP (input_size - consumed);
+					continue;
+				}
+				if (strm.avail_out > 0) {
+					fprintf (stderr, "inflate failed: truncated input\n");
+					break;
+				}
+			}
+			size_t produced = (size_t)(strm.next_out - buf);
+			if (produced >= alloc) {
+				if (alloc > SIZE_MAX / 2) {
+					fprintf (stderr, "Output buffer too large\n");
+					break;
+				}
+				size_t new_alloc = alloc * 2;
+				uint8_t *new_buf = (uint8_t *)realloc (buf, new_alloc);
+				if (!new_buf) {
+					fprintf (stderr, "Out of memory expanding output buffer\n");
+					break;
+				}
+				buf = new_buf;
+				alloc = new_alloc;
+			}
+			strm.next_out = buf + produced;
+			strm.avail_out = UINT_CLAMP (alloc - produced);
+			continue;
+		}
+		if (ret != Z_OK) {
+			fprintf (stderr, "inflate failed: %d (avail_in=%u avail_out=%u total_out=%lu)\n",
+				ret, strm.avail_in, strm.avail_out, (unsigned long)strm.total_out);
+			break;
+		}
+	}
+
+	*out_size = (size_t)(strm.next_out - buf);
+	inflateEnd (&strm);
+	if (!ok) {
+		free (buf);
+		return NULL;
+	}
+	return buf;
+}
+
+/* Deflate (compress) a buffer with gzip framing.
+ * Returns a malloc'd buffer on success (caller frees), NULL on failure.
+ * Sets *out_size to the compressed size on success. */
+static uint8_t *deflate_to_gzip(const uint8_t *input_data, size_t input_size, size_t *out_size) {
+	z_stream strm;
+	memset (&strm, 0, sizeof (strm));
+
+	if (deflateInit2 (&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, MAX_WBITS + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
+		fprintf (stderr, "deflateInit2 failed\n");
+		return NULL;
+	}
+
+	size_t alloc = input_size + (input_size / 8) + 128;
+	if (alloc < 256) {
+		alloc = 256;
+	}
+	uint8_t *buf = (uint8_t *)malloc (alloc);
+	if (!buf) {
+		fprintf (stderr, "Out of memory for output buffer\n");
+		deflateEnd (&strm);
+		return NULL;
+	}
+
+	strm.next_in = (uint8_t *)input_data;
+	strm.avail_in = UINT_CLAMP (input_size);
+	strm.next_out = buf;
+	strm.avail_out = UINT_CLAMP (alloc);
+
+	int ret = deflate (&strm, Z_FINISH);
+	*out_size = (size_t)(strm.next_out - buf);
+	deflateEnd (&strm);
+	if (ret != Z_STREAM_END) {
+		fprintf (stderr, "deflate failed: %d\n", ret);
+		free (buf);
+		return NULL;
+	}
+	return buf;
+}
+
 /* Decompress a gzip file (gunzip mode) */
 static int gunzip_file(const char *input_path, const char *output_path) {
 	FILE *fin = fopen (input_path, "rb");
@@ -592,7 +713,6 @@ static int gunzip_file(const char *input_path, const char *output_path) {
 		return 1;
 	}
 
-	/* Read entire input file */
 	fseek (fin, 0, SEEK_END);
 	long fsize = ftell (fin);
 	fseek (fin, 0, SEEK_SET);
@@ -619,99 +739,13 @@ static int gunzip_file(const char *input_path, const char *output_path) {
 	}
 	fclose (fin);
 
-	/* Initialize inflate with auto-detect (gzip or zlib) */
-	z_stream strm;
-	memset (&strm, 0, sizeof (strm));
-	strm.next_in = input_data;
-	strm.avail_in = UINT_CLAMP (input_size);
-
-	/* MAX_WBITS + 32 = auto-detect gzip or zlib header */
-	int ret = inflateInit2 (&strm, MAX_WBITS + 32);
-	if (ret != Z_OK) {
-		fprintf (stderr, "inflateInit2 failed: %d\n", ret);
-		free (input_data);
-		return 1;
-	}
-
-	/* Allocate output buffer - start with 4x input size */
-	size_t out_alloc = input_size * 4;
-	if (out_alloc < 65536) {
-		out_alloc = 65536;
-	}
-	uint8_t *output_data = (uint8_t *)malloc (out_alloc);
-	if (!output_data) {
-		fprintf (stderr, "Out of memory for output buffer\n");
-		inflateEnd (&strm);
-		free (input_data);
-		return 1;
-	}
-
-	strm.next_out = output_data;
-	strm.avail_out = UINT_CLAMP (out_alloc);
-
-	/* Decompress */
-	while (1) {
-		ret = inflate (&strm, Z_NO_FLUSH);
-		if (ret == Z_STREAM_END) {
-			break;
-		}
-		if (ret == Z_BUF_ERROR) {
-			/* Refill clamped input */
-			if (strm.avail_in == 0) {
-				size_t consumed = (size_t)(strm.next_in - input_data);
-				if (consumed < input_size) {
-					strm.avail_in = UINT_CLAMP (input_size - consumed);
-					continue;
-				}
-				/* All input consumed with output space available: truncated */
-				if (strm.avail_out > 0) {
-					fprintf (stderr, "inflate failed: truncated input\n");
-					inflateEnd (&strm);
-					free (output_data);
-					free (input_data);
-					return 1;
-				}
-			}
-			/* Grow or refill output buffer */
-			size_t produced = (size_t)(strm.next_out - output_data);
-			if (produced >= out_alloc) {
-				if (out_alloc > SIZE_MAX / 2) {
-					fprintf (stderr, "Output buffer too large\n");
-					inflateEnd (&strm);
-					free (output_data);
-					free (input_data);
-					return 1;
-				}
-				size_t new_alloc = out_alloc * 2;
-				uint8_t *new_buf = (uint8_t *)realloc (output_data, new_alloc);
-				if (!new_buf) {
-					fprintf (stderr, "Out of memory expanding output buffer\n");
-					inflateEnd (&strm);
-					free (output_data);
-					free (input_data);
-					return 1;
-				}
-				output_data = new_buf;
-				out_alloc = new_alloc;
-			}
-			strm.next_out = output_data + produced;
-			strm.avail_out = UINT_CLAMP (out_alloc - produced);
-			continue;
-		}
-		if (ret != Z_OK) {
-			fprintf (stderr, "inflate failed: %d (avail_in=%u avail_out=%u total_out=%lu)\n", ret, strm.avail_in, strm.avail_out, (unsigned long)strm.total_out);
-			inflateEnd (&strm);
-			free (output_data);
-			free (input_data);
-			return 1;
-		}
-	}
-
-	size_t output_size = (size_t)(strm.next_out - output_data);
-	inflateEnd (&strm);
+	size_t output_size = 0;
+	uint8_t *output_data = inflate_buffer (input_data, input_size, &output_size);
 	free (input_data);
+	if (!output_data) {
+		return 1;
+	}
 
-	/* Write output */
 	FILE *fout = fopen (output_path, "wb");
 	if (!fout) {
 		fprintf (stderr, "Cannot create output file: %s\n", output_path);
@@ -728,12 +762,8 @@ static int gunzip_file(const char *input_path, const char *output_path) {
 
 	fclose (fout);
 	free (output_data);
-
 	printf ("Decompressed %s -> %s (%ld -> %lu bytes)\n",
-		input_path,
-		output_path,
-		fsize,
-		(unsigned long)output_size);
+		input_path, output_path, fsize, (unsigned long)output_size);
 	return 0;
 }
 
@@ -745,7 +775,6 @@ static int gzip_file(const char *input_path, const char *output_path) {
 		return 1;
 	}
 
-	/* Read entire input file */
 	fseek (fin, 0, SEEK_END);
 	long fsize = ftell (fin);
 	fseek (fin, 0, SEEK_SET);
@@ -774,50 +803,13 @@ static int gzip_file(const char *input_path, const char *output_path) {
 	}
 	fclose (fin);
 
-	/* Initialize deflate for gzip output (MAX_WBITS + 16) */
-	z_stream strm;
-	memset (&strm, 0, sizeof (strm));
-
-	int ret = deflateInit2 (&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, MAX_WBITS + 16, 8, Z_DEFAULT_STRATEGY);
-	if (ret != Z_OK) {
-		fprintf (stderr, "deflateInit2 failed: %d\n", ret);
-		free (input_data);
-		return 1;
-	}
-
-	/* Allocate output buffer */
-	size_t out_alloc = input_size + (input_size / 8) + 128;
-	if (out_alloc < 256) {
-		out_alloc = 256;
-	}
-	uint8_t *output_data = (uint8_t *)malloc (out_alloc);
-	if (!output_data) {
-		fprintf (stderr, "Out of memory for output buffer\n");
-		deflateEnd (&strm);
-		free (input_data);
-		return 1;
-	}
-
-	strm.next_in = input_data;
-	strm.avail_in = UINT_CLAMP (input_size);
-	strm.next_out = output_data;
-	strm.avail_out = UINT_CLAMP (out_alloc);
-
-	/* Compress */
-	ret = deflate (&strm, Z_FINISH);
-	if (ret != Z_STREAM_END) {
-		fprintf (stderr, "deflate failed: %d\n", ret);
-		deflateEnd (&strm);
-		free (output_data);
-		free (input_data);
-		return 1;
-	}
-
-	size_t output_size = (size_t)(strm.next_out - output_data);
-	deflateEnd (&strm);
+	size_t output_size = 0;
+	uint8_t *output_data = deflate_to_gzip (input_data, input_size, &output_size);
 	free (input_data);
+	if (!output_data) {
+		return 1;
+	}
 
-	/* Write output */
 	FILE *fout = fopen (output_path, "wb");
 	if (!fout) {
 		fprintf (stderr, "Cannot create output file: %s\n", output_path);
@@ -834,12 +826,8 @@ static int gzip_file(const char *input_path, const char *output_path) {
 
 	fclose (fout);
 	free (output_data);
-
 	printf ("Compressed %s -> %s (%ld -> %lu bytes)\n",
-		input_path,
-		output_path,
-		fsize,
-		(unsigned long)output_size);
+		input_path, output_path, fsize, (unsigned long)output_size);
 	return 0;
 }
 
