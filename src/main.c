@@ -58,9 +58,6 @@ extern int deflateEnd(z_stream *strm);
 #ifdef _WIN32
 #include <direct.h>
 #include <io.h>
-#ifdef _MSC_VER
-#include <share.h>
-#endif
 #else
 #include <unistd.h>
 #endif
@@ -95,11 +92,14 @@ static int g_force = 0;
 #ifndef S_ISREG
 #define S_ISREG(mode) (((mode) & _S_IFMT) == _S_IFREG)
 #endif
-/* MSVC doesn't define mode_t or ssize_t */
+/* MSVC doesn't define mode_t or ssize_t; map POSIX names to CRT equivalents */
 #ifdef _MSC_VER
+#pragma warning(disable:4996)
 typedef unsigned short mode_t;
 typedef intptr_t ssize_t;
+#define open _open
 #define close _close
+#define write _write
 #endif
 #else
 #define OTEZIP_MKDIR(path, mode) mkdir((path),(mode))
@@ -107,92 +107,8 @@ typedef intptr_t ssize_t;
 #define OTEZIP_FCHMOD(fd, mode) fchmod((fd),(mode))
 #endif
 
-static int otezip_copy_string(char *dst, size_t dst_size, const char *src) {
-	size_t src_len;
-
-	if (!dst || dst_size == 0 || !src) {
-		return -1;
-	}
-	src_len = strlen (src);
-	if (src_len >= dst_size) {
-		dst[0] = '\0';
-		return -1;
-	}
-	memcpy (dst, src, src_len + 1);
-	return 0;
-}
-
-static const char *otezip_strerror_buf(int errnum, char *buf, size_t buf_size) {
-	if (!buf || buf_size == 0) {
-		return "unknown error";
-	}
-#ifdef _MSC_VER
-	if (strerror_s (buf, buf_size, errnum) == 0) {
-		return buf;
-	}
-#else
-	{
-		const char *msg = strerror (errnum);
-		if (msg && otezip_copy_string (buf, buf_size, msg) == 0) {
-			return buf;
-		}
-	}
-#endif
-	if (snprintf (buf, buf_size, "error %d", errnum) < 0) {
-		buf[0] = '\0';
-	}
-	buf[buf_size - 1] = '\0';
-	return buf;
-}
-
-static int otezip_open_with_mode(const char *path, int flags, mode_t mode) {
-#ifdef _MSC_VER
-	int fd = -1;
-	int ret = _sopen_s (&fd, path, flags, _SH_DENYNO, mode);
-	if (ret != 0) {
-		errno = ret;
-		return -1;
-	}
-	return fd;
-#else
-	return open (path, flags, mode);
-#endif
-}
-
-static int otezip_open_without_mode(const char *path, int flags) {
-#ifdef _MSC_VER
-	int fd = -1;
-	int ret = _sopen_s (&fd, path, flags, _SH_DENYNO, 0);
-	if (ret != 0) {
-		errno = ret;
-		return -1;
-	}
-	return fd;
-#else
-	return open (path, flags);
-#endif
-}
-
-static ssize_t otezip_write_fd(int fd, const void *buf, size_t count) {
-#ifdef _MSC_VER
-	unsigned int chunk = (count > (size_t)UINT_MAX)? UINT_MAX: (unsigned int)count;
-	return _write (fd, buf, chunk);
-#else
-	return write (fd, buf, count);
-#endif
-}
-
-static uInt otezip_chunk_length(size_t value) {
-	return (value > (size_t)UINT_MAX)? (uInt)UINT_MAX: (uInt)value;
-}
-
-static size_t otezip_input_used(const z_stream *strm, const uint8_t *input_data) {
-	return input_data? (size_t) (strm->next_in - (const Bytef *)input_data): 0;
-}
-
-static size_t otezip_output_used(const z_stream *strm, const uint8_t *output_data) {
-	return (size_t) (strm->next_out - (const Bytef *)output_data);
-}
+/* Clamp size_t to uInt for zlib avail_in/avail_out */
+#define UINT_CLAMP(x) ((uInt)(((x) > (size_t)UINT_MAX) ? UINT_MAX : (x)))
 
 static void usage(void) {
 	puts ("mzip – minimal ZIP reader/writer (mzip.h demo)\n"
@@ -452,9 +368,8 @@ static int sanitize_extract_path(const char *name, char *out, size_t outlen) {
 /* Ensure parent directories exist and are not symlinks. Return 0 on success. */
 static int ensure_parent_dirs(const char *path) {
 	char tmp[PATH_MAX];
-	if (otezip_copy_string (tmp, sizeof (tmp), path) != 0) {
-		return -1;
-	}
+	strncpy (tmp, path, sizeof (tmp));
+	tmp[sizeof (tmp) - 1] = '\0';
 
 	size_t len = strlen (tmp);
 	for (size_t i = 0; i < len; ++i) {
@@ -588,36 +503,32 @@ static int extract_all(const char *path) {
 		 * stdio buffering issues. */
 		int fd = -1;
 		int open_flags = O_WRONLY | O_CREAT | O_EXCL;
-		fd = otezip_open_with_mode (fname_sanitized, open_flags | O_BINARY, desired_mode);
+		fd = open (fname_sanitized, open_flags | O_BINARY, desired_mode);
 		if (fd < 0) {
 			if (errno == EEXIST) {
-					if (!g_force) {
-						fprintf (stderr, "Skipping existing file (use -f to overwrite): %s\n", fname_sanitized);
-						zip_fclose (zf);
-						continue;
-					}
-					/* Force path: open for write/truncate but ensure it's not a symlink */
-					if (OTEZIP_LSTAT (fname_sanitized, &pst) == 0 && S_ISLNK (pst.st_mode) && g_extract_policy == POLICY_REJECT) {
-						fprintf (stderr, "Refusing to overwrite symlink: %s\n", fname_sanitized);
-						zip_fclose (zf);
-						continue;
-					}
-					fd = otezip_open_without_mode (fname_sanitized, O_WRONLY | O_TRUNC | O_NOFOLLOW | O_BINARY);
-					if (fd < 0) {
-						int saved_errno = errno;
-						char errbuf[128];
-						fprintf (stderr, "Cannot open for overwrite %s: %s\n", fname_sanitized, otezip_strerror_buf (saved_errno, errbuf, sizeof (errbuf)));
-						zip_fclose (zf);
-						continue;
-					}
-				} else {
-					int saved_errno = errno;
-					char errbuf[128];
-					fprintf (stderr, "Cannot create %s: %s\n", fname_sanitized, otezip_strerror_buf (saved_errno, errbuf, sizeof (errbuf)));
+				if (!g_force) {
+					fprintf (stderr, "Skipping existing file (use -f to overwrite): %s\n", fname_sanitized);
 					zip_fclose (zf);
 					continue;
 				}
+				/* Force path: open for write/truncate but ensure it's not a symlink */
+				if (OTEZIP_LSTAT (fname_sanitized, &pst) == 0 && S_ISLNK (pst.st_mode) && g_extract_policy == POLICY_REJECT) {
+					fprintf (stderr, "Refusing to overwrite symlink: %s\n", fname_sanitized);
+					zip_fclose (zf);
+					continue;
+				}
+				fd = open (fname_sanitized, O_WRONLY | O_TRUNC | O_NOFOLLOW | O_BINARY);
+				if (fd < 0) {
+					fprintf (stderr, "Cannot open for overwrite %s: %s\n", fname_sanitized, strerror (errno));
+					zip_fclose (zf);
+					continue;
+				}
+			} else {
+				fprintf (stderr, "Cannot create %s: %s\n", fname_sanitized, strerror (errno));
+				zip_fclose (zf);
+				continue;
 			}
+		}
 
 		/* After creating/opening, ensure we didn't follow a symlink to a special file. */
 		struct stat st2;
@@ -634,32 +545,29 @@ static int extract_all(const char *path) {
 			continue;
 		}
 
-			/* Apply safe permissions (masking out SUID/SGID/sticky by using 0777 mask) */
-			if (OTEZIP_FCHMOD (fd, desired_mode & 0777) != 0) {
-				/* Non-fatal: warn but continue */
-				int saved_errno = errno;
-				char errbuf[128];
-				fprintf (stderr, "Warning: failed to set permissions on %s: %s\n", fname_sanitized, otezip_strerror_buf (saved_errno, errbuf, sizeof (errbuf)));
-			}
+		/* Apply safe permissions (masking out SUID/SGID/sticky by using 0777 mask) */
+		if (OTEZIP_FCHMOD (fd, desired_mode & 0777) != 0) {
+			/* Non-fatal: warn but continue */
+			fprintf (stderr, "Warning: failed to set permissions on %s: %s\n", fname_sanitized, strerror (errno));
+		}
 
-			/* Write the file content */
-			size_t wrote = 0;
-			const uint8_t *data = (const uint8_t *)zf->data;
-			size_t remain = zf->size;
-			while (remain > 0) {
-				ssize_t n = otezip_write_fd (fd, data + wrote, remain);
-				if (n < 0) {
-					if (errno == EINTR) {
-						continue;
-					}
-					int saved_errno = errno;
-					char errbuf[128];
-					fprintf (stderr, "Write error for %s: %s\n", fname_sanitized, otezip_strerror_buf (saved_errno, errbuf, sizeof (errbuf)));
-					break;
+		/* Write the file content */
+		size_t wrote = 0;
+		const uint8_t *data = (const uint8_t *)zf->data;
+		size_t remain = zf->size;
+		while (remain > 0) {
+			unsigned int wlen = (remain > UINT_MAX) ? UINT_MAX : (unsigned int)remain;
+			ssize_t n = write (fd, data + wrote, wlen);
+			if (n < 0) {
+				if (errno == EINTR) {
+					continue;
 				}
-				wrote += (size_t)n;
-				remain -= (size_t)n;
+				fprintf (stderr, "Write error for %s: %s\n", fname_sanitized, strerror (errno));
+				break;
 			}
+			wrote += (size_t)n;
+			remain -= (size_t)n;
+		}
 		close (fd);
 
 		/* Save size before closing – zip_fclose () frees the zip_file_t */
@@ -686,24 +594,24 @@ static int gunzip_file(const char *input_path, const char *output_path) {
 
 	/* Read entire input file */
 	fseek (fin, 0, SEEK_END);
-	long input_size = ftell (fin);
+	long fsize = ftell (fin);
 	fseek (fin, 0, SEEK_SET);
 
-	if (input_size <= 0) {
+	if (fsize <= 0) {
 		fprintf (stderr, "Invalid input file size\n");
 		fclose (fin);
 		return 1;
 	}
-	size_t input_size_sz = (size_t)input_size;
+	size_t input_size = (size_t)fsize;
 
-	uint8_t *input_data = (uint8_t *)malloc (input_size_sz);
+	uint8_t *input_data = (uint8_t *)malloc (input_size);
 	if (!input_data) {
 		fprintf (stderr, "Out of memory\n");
 		fclose (fin);
 		return 1;
 	}
 
-	if (fread (input_data, 1, input_size_sz, fin) != input_size_sz) {
+	if (fread (input_data, 1, input_size, fin) != input_size) {
 		fprintf (stderr, "Failed to read input file\n");
 		free (input_data);
 		fclose (fin);
@@ -715,7 +623,7 @@ static int gunzip_file(const char *input_path, const char *output_path) {
 	z_stream strm;
 	memset (&strm, 0, sizeof (strm));
 	strm.next_in = input_data;
-	strm.avail_in = otezip_chunk_length (input_size_sz);
+	strm.avail_in = UINT_CLAMP (input_size);
 
 	/* MAX_WBITS + 32 = auto-detect gzip or zlib header */
 	int ret = inflateInit2 (&strm, MAX_WBITS + 32);
@@ -726,7 +634,7 @@ static int gunzip_file(const char *input_path, const char *output_path) {
 	}
 
 	/* Allocate output buffer - start with 4x input size */
-	size_t out_alloc = input_size_sz * 4;
+	size_t out_alloc = input_size * 4;
 	if (out_alloc < 65536) {
 		out_alloc = 65536;
 	}
@@ -739,7 +647,7 @@ static int gunzip_file(const char *input_path, const char *output_path) {
 	}
 
 	strm.next_out = output_data;
-	strm.avail_out = otezip_chunk_length (out_alloc);
+	strm.avail_out = UINT_CLAMP (out_alloc);
 
 	/* Decompress */
 	while (1) {
@@ -747,47 +655,47 @@ static int gunzip_file(const char *input_path, const char *output_path) {
 		if (ret == Z_STREAM_END) {
 			break;
 		}
-		if (strm.avail_in == 0) {
-			size_t input_used = otezip_input_used (&strm, input_data);
-			if (input_used < input_size_sz) {
-				strm.avail_in = otezip_chunk_length (input_size_sz - input_used);
+		if (ret == Z_BUF_ERROR) {
+			/* Refill clamped input */
+			if (strm.avail_in == 0) {
+				size_t consumed = (size_t)(strm.next_in - input_data);
+				if (consumed < input_size) {
+					strm.avail_in = UINT_CLAMP (input_size - consumed);
+					continue;
+				}
+				/* All input consumed with output space available: truncated */
+				if (strm.avail_out > 0) {
+					fprintf (stderr, "inflate failed: truncated input\n");
+					inflateEnd (&strm);
+					free (output_data);
+					free (input_data);
+					return 1;
+				}
 			}
-		}
-		if (strm.avail_out == 0) {
-			size_t output_used = otezip_output_used (&strm, output_data);
-			if (output_used == out_alloc) {
-				if (out_alloc > (SIZE_MAX / 2)) {
+			/* Grow or refill output buffer */
+			size_t produced = (size_t)(strm.next_out - output_data);
+			if (produced >= out_alloc) {
+				if (out_alloc > SIZE_MAX / 2) {
 					fprintf (stderr, "Output buffer too large\n");
 					inflateEnd (&strm);
 					free (output_data);
 					free (input_data);
 					return 1;
 				}
-				{
-					size_t new_alloc = out_alloc * 2;
-					uint8_t *new_buf = (uint8_t *)realloc (output_data, new_alloc);
-					if (!new_buf) {
-						fprintf (stderr, "Out of memory expanding output buffer\n");
-						inflateEnd (&strm);
-						free (output_data);
-						free (input_data);
-						return 1;
-					}
-					output_data = new_buf;
-					out_alloc = new_alloc;
-					strm.next_out = output_data + output_used;
+				size_t new_alloc = out_alloc * 2;
+				uint8_t *new_buf = (uint8_t *)realloc (output_data, new_alloc);
+				if (!new_buf) {
+					fprintf (stderr, "Out of memory expanding output buffer\n");
+					inflateEnd (&strm);
+					free (output_data);
+					free (input_data);
+					return 1;
 				}
+				output_data = new_buf;
+				out_alloc = new_alloc;
 			}
-			strm.avail_out = otezip_chunk_length (out_alloc - otezip_output_used (&strm, output_data));
-		}
-		if (ret == Z_BUF_ERROR) {
-			if (strm.avail_in == 0 && otezip_input_used (&strm, input_data) >= input_size_sz) {
-				fprintf (stderr, "inflate failed: truncated input\n");
-				inflateEnd (&strm);
-				free (output_data);
-				free (input_data);
-				return 1;
-			}
+			strm.next_out = output_data + produced;
+			strm.avail_out = UINT_CLAMP (out_alloc - produced);
 			continue;
 		}
 		if (ret != Z_OK) {
@@ -799,7 +707,7 @@ static int gunzip_file(const char *input_path, const char *output_path) {
 		}
 	}
 
-	size_t output_size = otezip_output_used (&strm, output_data);
+	size_t output_size = (size_t)(strm.next_out - output_data);
 	inflateEnd (&strm);
 	free (input_data);
 
@@ -824,7 +732,7 @@ static int gunzip_file(const char *input_path, const char *output_path) {
 	printf ("Decompressed %s -> %s (%ld -> %lu bytes)\n",
 		input_path,
 		output_path,
-		input_size,
+		fsize,
 		(unsigned long)output_size);
 	return 0;
 }
@@ -839,25 +747,25 @@ static int gzip_file(const char *input_path, const char *output_path) {
 
 	/* Read entire input file */
 	fseek (fin, 0, SEEK_END);
-	long input_size = ftell (fin);
+	long fsize = ftell (fin);
 	fseek (fin, 0, SEEK_SET);
 
-	if (input_size < 0) {
+	if (fsize < 0) {
 		fprintf (stderr, "Invalid input file size\n");
 		fclose (fin);
 		return 1;
 	}
-	size_t input_size_sz = (size_t)input_size;
+	size_t input_size = (size_t)fsize;
 
 	uint8_t *input_data = NULL;
 	if (input_size > 0) {
-		input_data = (uint8_t *)malloc (input_size_sz);
+		input_data = (uint8_t *)malloc (input_size);
 		if (!input_data) {
 			fprintf (stderr, "Out of memory\n");
 			fclose (fin);
 			return 1;
 		}
-		if (fread (input_data, 1, input_size_sz, fin) != input_size_sz) {
+		if (fread (input_data, 1, input_size, fin) != input_size) {
 			fprintf (stderr, "Failed to read input file\n");
 			free (input_data);
 			fclose (fin);
@@ -878,7 +786,7 @@ static int gzip_file(const char *input_path, const char *output_path) {
 	}
 
 	/* Allocate output buffer */
-	size_t out_alloc = input_size_sz + (input_size_sz / 8) + 128;
+	size_t out_alloc = input_size + (input_size / 8) + 128;
 	if (out_alloc < 256) {
 		out_alloc = 256;
 	}
@@ -891,59 +799,21 @@ static int gzip_file(const char *input_path, const char *output_path) {
 	}
 
 	strm.next_in = input_data;
-	strm.avail_in = otezip_chunk_length (input_size_sz);
+	strm.avail_in = UINT_CLAMP (input_size);
 	strm.next_out = output_data;
-	strm.avail_out = otezip_chunk_length (out_alloc);
+	strm.avail_out = UINT_CLAMP (out_alloc);
 
 	/* Compress */
-	while (1) {
-		ret = deflate (&strm, Z_FINISH);
-		if (ret == Z_STREAM_END) {
-			break;
-		}
-		if (strm.avail_in == 0) {
-			size_t input_used = otezip_input_used (&strm, input_data);
-			if (input_used < input_size_sz) {
-				strm.avail_in = otezip_chunk_length (input_size_sz - input_used);
-			}
-		}
-		if (strm.avail_out == 0) {
-			size_t output_used = otezip_output_used (&strm, output_data);
-			if (output_used == out_alloc) {
-				if (out_alloc > (SIZE_MAX / 2)) {
-					fprintf (stderr, "Output buffer too large\n");
-					deflateEnd (&strm);
-					free (output_data);
-					free (input_data);
-					return 1;
-				}
-				{
-					size_t new_alloc = out_alloc * 2;
-					uint8_t *new_buf = (uint8_t *)realloc (output_data, new_alloc);
-					if (!new_buf) {
-						fprintf (stderr, "Out of memory expanding output buffer\n");
-						deflateEnd (&strm);
-						free (output_data);
-						free (input_data);
-						return 1;
-					}
-					output_data = new_buf;
-					out_alloc = new_alloc;
-					strm.next_out = output_data + output_used;
-				}
-			}
-			strm.avail_out = otezip_chunk_length (out_alloc - otezip_output_used (&strm, output_data));
-		}
-		if (ret != Z_OK && ret != Z_BUF_ERROR) {
-			fprintf (stderr, "deflate failed: %d\n", ret);
-			deflateEnd (&strm);
-			free (output_data);
-			free (input_data);
-			return 1;
-		}
+	ret = deflate (&strm, Z_FINISH);
+	if (ret != Z_STREAM_END) {
+		fprintf (stderr, "deflate failed: %d\n", ret);
+		deflateEnd (&strm);
+		free (output_data);
+		free (input_data);
+		return 1;
 	}
 
-	size_t output_size = otezip_output_used (&strm, output_data);
+	size_t output_size = (size_t)(strm.next_out - output_data);
 	deflateEnd (&strm);
 	free (input_data);
 
@@ -968,7 +838,7 @@ static int gzip_file(const char *input_path, const char *output_path) {
 	printf ("Compressed %s -> %s (%ld -> %lu bytes)\n",
 		input_path,
 		output_path,
-		input_size,
+		fsize,
 		(unsigned long)output_size);
 	return 0;
 }
@@ -1001,10 +871,8 @@ int main(int argc, char **argv) {
 		const char *input_path = argv[2];
 		char output_path[PATH_MAX];
 		if (argc >= 4) {
-				if (otezip_copy_string (output_path, sizeof (output_path), argv[3]) != 0) {
-					fprintf (stderr, "Output path too long: %s\n", argv[3]);
-					return 1;
-				}
+			strncpy (output_path, argv[3], sizeof (output_path) - 1);
+			output_path[sizeof (output_path) - 1] = '\0';
 		} else {
 			/* Remove .gz extension if present, else add .out */
 			size_t len = strlen (input_path);
@@ -1015,7 +883,7 @@ int main(int argc, char **argv) {
 			}
 		}
 		return gunzip_file (input_path, output_path);
-		}
+	}
 
 	if (strcmp (argv[1], "-g") == 0) {
 		/* Compress (gzip) mode */
@@ -1027,15 +895,13 @@ int main(int argc, char **argv) {
 		const char *input_path = argv[2];
 		char output_path[PATH_MAX];
 		if (argc >= 4) {
-				if (otezip_copy_string (output_path, sizeof (output_path), argv[3]) != 0) {
-					fprintf (stderr, "Output path too long: %s\n", argv[3]);
-					return 1;
-				}
+			strncpy (output_path, argv[3], sizeof (output_path) - 1);
+			output_path[sizeof (output_path) - 1] = '\0';
 		} else {
 			snprintf (output_path, sizeof (output_path), "%s.gz", input_path);
 		}
 		return gzip_file (input_path, output_path);
-		}
+	}
 
 	if (argc < 3) {
 		usage ();
