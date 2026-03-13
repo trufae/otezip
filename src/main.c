@@ -1017,13 +1017,15 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 		return list_files (zip_path);
-	} else if (mode_extract) {
+	}
+	if (mode_extract) {
 		if (argc < 3) {
 			usage ();
 			return 1;
 		}
 		return extract_all (zip_path);
-	} else if (mode_create || mode_append) {
+	}
+	if (mode_create || mode_append) {
 		if (argc < 4) {
 			fprintf (stderr, "Error: No files specified to %s.\n", mode_create? "create archive with": "add to archive");
 			usage ();
