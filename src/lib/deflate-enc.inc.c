@@ -5,6 +5,7 @@ typedef struct {
 	/* Compression parameters */
 	int level; /* Compression level */
 	int is_last_block; /* Is this the final block? */
+	int finalized; /* End-of-stream marker already emitted */
 
 	/* Sliding window for LZ77 */
 	uint8_t *window; /* Sliding window buffer */
@@ -319,7 +320,12 @@ int deflate(z_stream *strm, int flush) {
 		return flush == Z_FINISH? Z_STREAM_END: Z_OK;
 	}
 
+	if (state->finalized) {
+		return flush == Z_FINISH? Z_STREAM_END: Z_OK;
+	}
+
 	/* Use fixed Huffman codes for simplicity */
+	int block_opened = 0;
 	if (strm->avail_in > 0) {
 		/* Write block header - type 01 (fixed Huffman) */
 		int ret = write_bits (strm, state, state->is_last_block? 1: 0, 1); /* Final block bit */
@@ -331,6 +337,7 @@ int deflate(z_stream *strm, int flush) {
 		if (ret != Z_OK) {
 			return ret;
 		}
+		block_opened = 1;
 
 		/* Process all input data */
 		while (strm->avail_in > 0) {
@@ -515,13 +522,26 @@ int deflate(z_stream *strm, int flush) {
 			}
 		}
 
-		/* If this is the end of stream, write end of block marker */
-		if (flush == Z_FINISH) {
-			/* Write end of block symbol (256) */
-			write_huffman_code (strm, state, state->literals.codes[256], state->literals.lengths[256]);
-			/* Flush remaining bits */
-			flush_bits (strm, state);
+	}
+
+	/* Close the stream with a final block when Z_FINISH was requested.
+	 * If no block was opened above (avail_in was 0), open an empty fixed
+	 * Huffman block first so the EOB symbol is properly framed. */
+	if (flush == Z_FINISH && !state->finalized) {
+		if (!block_opened) {
+			int ret = write_bits (strm, state, 1, 1); /* Final block bit */
+			if (ret != Z_OK) {
+				return ret;
+			}
+			ret = write_bits (strm, state, 1, 2); /* Block type 01 */
+			if (ret != Z_OK) {
+				return ret;
+			}
 		}
+		/* Write end of block symbol (256) and flush remaining bits. */
+		write_huffman_code (strm, state, state->literals.codes[256], state->literals.lengths[256]);
+		flush_bits (strm, state);
+		state->finalized = 1;
 	}
 
 	return flush == Z_FINISH? Z_STREAM_END: Z_OK;
