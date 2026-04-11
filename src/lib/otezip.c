@@ -506,15 +506,12 @@ static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out
 		strm.next_out = ubuf;
 		strm.avail_out = e->uncomp_size;
 
-		/* Try raw deflate first (standard for ZIP files) */
+		/* Raw deflate (standard for ZIP files) */
 		int ret = inflateInit2 (&strm, -MAX_WBITS);
 		if (ret != Z_OK) {
-			/* Fall back to direct copy */
-			memcpy (ubuf, cbuf, e->uncomp_size < e->comp_size? e->uncomp_size: e->comp_size);
-			*out_buf = ubuf;
-			*out_sz = e->uncomp_size;
+			free (ubuf);
 			free (cbuf);
-			return 0;
+			return -1;
 		}
 
 		/* Attempt decompression */
