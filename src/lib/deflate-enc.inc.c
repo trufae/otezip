@@ -272,17 +272,20 @@ int deflate(z_stream *strm, int flush) {
 
 	/* If no compression wanted or very small level, just store uncompressed */
 	if (state->level == Z_NO_COMPRESSION) {
-		if (strm->avail_in > 0) {
-			/* Calculate block size - length fields + data */
-			uint32_t block_size = 4 + strm->avail_in;
+		/* Emit one stored block per DEFLATE 64KiB limit until avail_in is drained */
+		while (strm->avail_in > 0) {
+			uint32_t chunk = strm->avail_in > 0xFFFF? 0xFFFFu: strm->avail_in;
+			uint32_t block_size = 4 + chunk;
 
-			/* Check if we have enough output space */
+			/* Check if we have enough output space for this block's len/nlen + data */
 			if (strm->avail_out < block_size) {
 				return Z_BUF_ERROR;
 			}
 
-			/* Write block header using bit buffer - final bit + type 00 (uncompressed) */
-			int ret = write_bits (strm, state, state->is_last_block? 1: 0, 1); /* Final block bit */
+			/* BFINAL only on the block that drains the last of the input under Z_FINISH */
+			int is_final = (flush == Z_FINISH && chunk == strm->avail_in)? 1: 0;
+
+			int ret = write_bits (strm, state, is_final, 1); /* Final block bit */
 			if (ret != Z_OK) {
 				return ret;
 			}
@@ -296,7 +299,7 @@ int deflate(z_stream *strm, int flush) {
 			flush_bits (strm, state);
 
 			/* Write length and inverted length */
-			uint16_t len = strm->avail_in > 0xFFFF? 0xFFFF: strm->avail_in;
+			uint16_t len = (uint16_t)chunk;
 			*strm->next_out++ = len & 0xFF;
 			*strm->next_out++ = (len >> 8) & 0xFF;
 			*strm->next_out++ = (~len) & 0xFF;
@@ -305,13 +308,13 @@ int deflate(z_stream *strm, int flush) {
 			strm->total_out += 4;
 
 			/* Write data */
-			memcpy (strm->next_out, strm->next_in, len);
-			strm->next_in += len;
-			strm->avail_in -= len;
-			strm->total_in += len;
-			strm->next_out += len;
-			strm->avail_out -= len;
-			strm->total_out += len;
+			memcpy (strm->next_out, strm->next_in, chunk);
+			strm->next_in += chunk;
+			strm->avail_in -= chunk;
+			strm->total_in += chunk;
+			strm->next_out += chunk;
+			strm->avail_out -= chunk;
+			strm->total_out += chunk;
 		}
 		return flush == Z_FINISH? Z_STREAM_END: Z_OK;
 	}
