@@ -1273,12 +1273,15 @@ int zip_close(zip_t *za) {
 		return -1;
 	}
 	/* Finalize archive if in write mode */
+	int finalize_ret = 0;
 	if (za->mode == 1) {
-		otezip_finalize_archive (za);
+		finalize_ret = otezip_finalize_archive (za);
 	}
 
 	if (za->fp) {
-		fclose (za->fp);
+		if (fclose (za->fp) != 0 && finalize_ret == 0) {
+			finalize_ret = -1;
+		}
 	}
 	zip_uint64_t i;
 	for (i = 0; i < za->n_entries; i++) {
@@ -1288,7 +1291,7 @@ int zip_close(zip_t *za) {
 	}
 	free (za->entries);
 	free (za);
-	return 0;
+	return finalize_ret;
 }
 
 zip_uint64_t zip_get_num_files(zip_t *za) {
