@@ -366,6 +366,30 @@ test_nested_paths() {
 	fini
 }
 
+test_exit_codes() {
+	init
+	echo "[***] Testing exit codes on failures"
+	$MZ -c test.zip hello.txt -z store || error "otezip -c failed"
+	if $MZ -c bad.zip hello.txt missing.txt; then
+		error "missing input file did not fail"
+	fi
+	mkdir data && cd data
+	$MZ -x ../test.zip || error "clean extraction failed"
+	if $MZ -x ../test.zip; then
+		error "skipping an existing file did not fail"
+	fi
+	$MZ -x ../test.zip -f || error "forced extraction failed"
+	cd ..
+	# Corrupt the stored data (after the 30-byte header and 9-byte name)
+	printf 'X' | dd of=test.zip bs=1 seek=39 conv=notrunc 2>/dev/null
+	mkdir crc && cd crc
+	if $MZ -x ../test.zip --verify-crc; then
+		error "CRC mismatch did not fail with --verify-crc"
+	fi
+	cd ..
+	fini
+}
+
 test_strip_policy_symlinks() {
 	init
 	echo "[***] Testing that -Pstrip does not write through symlinks"
@@ -428,6 +452,7 @@ test_nested_paths || exit 1
 test_append || exit 1
 test_cli_option_order || exit 1
 test_strip_policy_symlinks || exit 1
+test_exit_codes || exit 1
 test_empty_files || exit 1
 test_binary_file || exit 1
 test_large_random_and_fallback || exit 1

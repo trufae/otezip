@@ -200,6 +200,7 @@ static int create_or_add_files(const char *path, char **files, int num_files, in
 		((struct zip *)za)->default_method = compression_method;
 	}
 
+	int failures = 0;
 	for (int i = 0; i < num_files; i++) {
 		const char *filename = files[i];
 
@@ -207,6 +208,7 @@ static int create_or_add_files(const char *path, char **files, int num_files, in
 		FILE *fp = fopen (filename, "rb");
 		if (!fp) {
 			fprintf (stderr, "Cannot open file: %s\n", filename);
+			failures++;
 			continue;
 		}
 
@@ -218,6 +220,7 @@ static int create_or_add_files(const char *path, char **files, int num_files, in
 		if (file_size < 0) {
 			fprintf (stderr, "Error determining file size: %s\n", filename);
 			fclose (fp);
+			failures++;
 			continue;
 		}
 
@@ -226,6 +229,7 @@ static int create_or_add_files(const char *path, char **files, int num_files, in
 		if (!buffer) {
 			fprintf (stderr, "Out of memory for file: %s\n", filename);
 			fclose (fp);
+			failures++;
 			continue;
 		}
 
@@ -233,6 +237,7 @@ static int create_or_add_files(const char *path, char **files, int num_files, in
 			fprintf (stderr, "Error reading file: %s\n", filename);
 			fclose (fp);
 			free (buffer);
+			failures++;
 			continue;
 		}
 		fclose (fp);
@@ -249,6 +254,7 @@ static int create_or_add_files(const char *path, char **files, int num_files, in
 		if (!src) {
 			fprintf (stderr, "Failed to create source for file: %s\n", filename);
 			free (buffer);
+			failures++;
 			continue;
 		}
 
@@ -257,6 +263,7 @@ static int create_or_add_files(const char *path, char **files, int num_files, in
 		if (idx < 0) {
 			fprintf (stderr, "Failed to add file to archive: %s\n", filename);
 			/* Source buffer is already freed in case of failure */
+			failures++;
 			continue;
 		}
 
@@ -267,8 +274,11 @@ static int create_or_add_files(const char *path, char **files, int num_files, in
 	}
 
 	/* Close and finalize the zip file */
-	zip_close (za);
-	return 0;
+	if (zip_close (za) != 0) {
+		fprintf (stderr, "Failed to write %s\n", path);
+		failures++;
+	}
+	return failures? 1: 0;
 }
 
 /* Normalize a zip entry name into 'out'. Return 0 on success, -1 on invalid path. */
@@ -441,11 +451,13 @@ static int extract_all(const char *path) {
 		return 1;
 	}
 
+	int failures = 0;
 	zip_uint64_t n = zip_get_num_files (za);
 	for (zip_uint64_t i = 0; i < n; ++i) {
 		zip_file_t *zf = zip_fopen_index (za, i, 0);
 		if (!zf) {
 			fprintf (stderr, "Could not read entry %llu\n", (unsigned long long)i);
+			failures++;
 			continue;
 		}
 
@@ -454,6 +466,7 @@ static int extract_all(const char *path) {
 		if (sanitize_extract_path (raw_name, fname_sanitized, sizeof (fname_sanitized)) != 0) {
 			fprintf (stderr, "Skipping suspicious entry: %s\n", raw_name? raw_name: "(null)");
 			zip_fclose (zf);
+			failures++;
 			continue;
 		}
 
@@ -462,10 +475,10 @@ static int extract_all(const char *path) {
 		if (rlen > 0 && raw_name[rlen - 1] == '/') {
 			if (ensure_parent_dirs (fname_sanitized) != 0) {
 				fprintf (stderr, "Failed to create directory for %s\n", fname_sanitized);
-			} else {
-				if (OTEZIP_MKDIR (fname_sanitized, 0755) != 0 && errno != EEXIST) {
-					fprintf (stderr, "Failed to create directory %s\n", fname_sanitized);
-				}
+				failures++;
+			} else if (OTEZIP_MKDIR (fname_sanitized, 0755) != 0 && errno != EEXIST) {
+				fprintf (stderr, "Failed to create directory %s\n", fname_sanitized);
+				failures++;
 			}
 			zip_fclose (zf);
 			continue;
@@ -474,6 +487,7 @@ static int extract_all(const char *path) {
 		if (ensure_parent_dirs (fname_sanitized) != 0) {
 			fprintf (stderr, "Cannot ensure parent dirs for %s\n", fname_sanitized);
 			zip_fclose (zf);
+			failures++;
 			continue;
 		}
 
@@ -483,12 +497,14 @@ static int extract_all(const char *path) {
 			if (!g_force) {
 				fprintf (stderr, "Skipping existing file (use -f to overwrite): %s\n", fname_sanitized);
 				zip_fclose (zf);
+				failures++;
 				continue;
 			}
 			/* If force is set and path is a symlink, reject unless policy allows */
 			if (S_ISLNK (pst.st_mode) && !follow_symlinks ()) {
 				fprintf (stderr, "Refusing to overwrite symlink: %s\n", fname_sanitized);
 				zip_fclose (zf);
+				failures++;
 				continue;
 			}
 		}
@@ -516,23 +532,27 @@ static int extract_all(const char *path) {
 				if (!g_force) {
 					fprintf (stderr, "Skipping existing file (use -f to overwrite): %s\n", fname_sanitized);
 					zip_fclose (zf);
+					failures++;
 					continue;
 				}
 				/* Force path: open for write/truncate but ensure it's not a symlink */
 				if (OTEZIP_LSTAT (fname_sanitized, &pst) == 0 && S_ISLNK (pst.st_mode) && !follow_symlinks ()) {
 					fprintf (stderr, "Refusing to overwrite symlink: %s\n", fname_sanitized);
 					zip_fclose (zf);
+					failures++;
 					continue;
 				}
 				fd = open (fname_sanitized, O_WRONLY | O_TRUNC | O_NOFOLLOW | O_BINARY);
 				if (fd < 0) {
 					fprintf (stderr, "Cannot open for overwrite %s: %s\n", fname_sanitized, strerror (errno));
 					zip_fclose (zf);
+					failures++;
 					continue;
 				}
 			} else {
 				fprintf (stderr, "Cannot create %s: %s\n", fname_sanitized, strerror (errno));
 				zip_fclose (zf);
+				failures++;
 				continue;
 			}
 		}
@@ -543,12 +563,14 @@ static int extract_all(const char *path) {
 			fprintf (stderr, "Failed to stat %s\n", fname_sanitized);
 			close (fd);
 			zip_fclose (zf);
+			failures++;
 			continue;
 		}
 		if (!S_ISREG (st2.st_mode)) {
 			fprintf (stderr, "Refusing to write non-regular file %s\n", fname_sanitized);
 			close (fd);
 			zip_fclose (zf);
+			failures++;
 			continue;
 		}
 
@@ -584,11 +606,12 @@ static int extract_all(const char *path) {
 			printf ("Extracted %s (%lu bytes)\n", fname_sanitized, (unsigned long)entry_size);
 		} else {
 			fprintf (stderr, "Failed to fully write %s\n", fname_sanitized);
+			failures++;
 		}
 	}
 
 	zip_close (za);
-	return 0;
+	return failures? 1: 0;
 }
 
 /* Inflate (decompress) a buffer with auto-detect gzip/zlib header.
