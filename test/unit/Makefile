@@ -26,6 +26,9 @@ test_lzfse: test_lzfse.c
 test_empty_zip: test_empty_zip.c ../../src/lib/otezip.c ../../src/include/otezip/zip.h ../../src/include/otezip/config.h
 	$(CC) $(CFLAGS) -o $@ $< ../../src/lib/otezip.c $(LDFLAGS)
 
+test_zipbomb: test_zipbomb.c ../../src/lib/otezip.c ../../src/include/otezip/zip.h ../../src/include/otezip/config.h
+	$(CC) $(CFLAGS) -o $@ $< ../../src/lib/otezip.c $(LDFLAGS)
+
 clean:
 	rm -f $(TESTS)
 
