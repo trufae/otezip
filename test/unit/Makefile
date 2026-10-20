@@ -8,7 +8,7 @@ SRCS = $(wildcard ../../src/lib/*.c) $(wildcard ../../src/include/otezip/*.h)
 
 # Tests that #include the sources they exercise
 STANDALONE = test_mzip_deflate test_lzma test_zstd test_lzfse test_deflate_reserved \
-	test_deflate_dynhdr test_deflate_distance test_deflate_tail test_lzma_stream test_source_oom
+	test_deflate_dynhdr test_deflate_distance test_deflate_tail test_lzma_stream test_source_oom test_lzfse_bounds
 # Tests linked against the library
 LIBRARY = test_empty_zip test_zipbomb test_append_badzip test_zip_overlap test_short_deflate \
 	test_set_file_compression

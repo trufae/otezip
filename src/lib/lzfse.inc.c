@@ -177,8 +177,9 @@ static size_t lz77_parse(const uint8_t *in, size_t in_sz, uint32_t *litlens, uin
 ================================================================ */
 
 static size_t lzfse_write_raw_block(const uint8_t *in, size_t in_sz, uint8_t *out, size_t out_cap) {
-	if (in_sz + 5 > out_cap) {
-		return 0; /* header (1)+len (4)+data */
+	/* header (1) + len (4) + data; the length field is 32 bits */
+	if (out_cap < 5 || in_sz > out_cap - 5 || in_sz > UINT32_MAX) {
+		return 0;
 	}
 	out[0] = 0x06; /* uncompressed block */
 	out[1] = (uint8_t)in_sz;
@@ -228,7 +229,8 @@ static size_t lzfse_decode_raw_block(const uint8_t *src, size_t src_sz, uint8_t 
 	}
 	uint32_t len = (uint32_t)src[1] | ((uint32_t)src[2] << 8) |
 		((uint32_t)src[3] << 16) | ((uint32_t)src[4] << 24);
-	if (len + 5 > src_sz || len > dst_cap) {
+	/* src_sz >= 5 here; len + 5 could wrap in 32 bits */
+	if (len > src_sz - 5 || len > dst_cap) {
 		return 0;
 	}
 	memcpy (dst, src + 5, len);
