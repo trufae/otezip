@@ -285,6 +285,46 @@ static long otezip_find_eocd(FILE *fp, uint8_t *eocd_out /*22+*/, size_t *cd_siz
 }
 
 /* parse central directory into array of otezip_entry */
+typedef struct {
+	uint64_t start;
+	uint64_t end;
+} otezip_span;
+
+static int otezip_span_cmp(const void *a, const void *b) {
+	const otezip_span *x = (const otezip_span *)a;
+	const otezip_span *y = (const otezip_span *)b;
+	return (x->start > y->start) - (x->start < y->start);
+}
+
+/* Reject entries sharing bytes: overlapping local headers or data let a tiny
+ * compressed kernel be extracted many times (overlapping-file zip bombs).
+ * Each span is a lower bound (30-byte header + compressed data, ignoring the
+ * name and extra fields), so valid archives are never rejected. */
+static int otezip_check_overlap(const zip_t *za) {
+	if (otezip_ignore_zipbomb || za->n_entries < 2) {
+		return 0;
+	}
+	otezip_span *spans = (otezip_span *)malloc (za->n_entries * sizeof (otezip_span));
+	if (!spans) {
+		return OTEZIP_ERR_READ;
+	}
+	zip_uint64_t i;
+	for (i = 0; i < za->n_entries; i++) {
+		spans[i].start = za->entries[i].local_hdr_ofs;
+		spans[i].end = spans[i].start + 30u + za->entries[i].comp_size;
+	}
+	qsort (spans, za->n_entries, sizeof (otezip_span), otezip_span_cmp);
+	int ret = 0;
+	for (i = 1; i < za->n_entries; i++) {
+		if (spans[i].start < spans[i - 1].end) {
+			ret = OTEZIP_ERR_INCONS;
+			break;
+		}
+	}
+	free (spans);
+	return ret;
+}
+
 /* Parse the central directory; *cd_ofs_out gets its offset, where appended
  * entries must start */
 static int otezip_load_central(zip_t *za, uint32_t *cd_ofs_out) {
@@ -407,6 +447,10 @@ static int otezip_load_central(zip_t *za, uint32_t *cd_ofs_out) {
 		off += entry_size;
 	}
 	free (cd_buf);
+	int overlap = otezip_check_overlap (za);
+	if (overlap != 0) {
+		return overlap;
+	}
 	*cd_ofs_out = cd_ofs;
 	return 0;
 }
