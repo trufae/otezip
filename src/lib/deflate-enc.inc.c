@@ -11,10 +11,10 @@ typedef struct {
 	uint8_t *window; /* Sliding window buffer */
 	uint32_t window_size; /* Window size (power of 2) */
 	uint32_t window_mask; /* Window mask (window_size - 1) */
-	uint32_t window_pos; /* Current position in window */
+	uint32_t pos; /* Stream position of the next input byte */
 
 	/* Hash table for fast string matching */
-	uint16_t *hash_table; /* Hash table for finding matches */
+	uint32_t *hash_table; /* Last stream position + 1 per hash, 0 = empty */
 	uint32_t hash_size; /* Size of hash table */
 	uint32_t hash_mask; /* Hash mask (hash_size - 1) */
 
@@ -29,87 +29,42 @@ typedef struct {
 
 /* ----------- Encoder-specific functions ----------- */
 
-/* Find longest match at current position */
-static int find_longest_match(deflate_state *state, const uint8_t *data, uint32_t pos, uint32_t max_len, uint32_t *match_pos) {
+/* Find longest match for the input at data (stream position state->pos).
+ * Returns the match length (0 if none) and stores its distance. */
+static int find_longest_match(deflate_state *state, const uint8_t *data, uint32_t max_len, uint32_t *distance) {
 	/* Need at least 3 bytes for a match */
 	if (max_len < 3) {
 		return 0;
 	}
-
-	/* Calculate hash for current position */
+	uint32_t cur = state->pos;
 	uint32_t hash = calculate_hash (data) & state->hash_mask;
-
-	/* Get position of potential match from hash table.
-	 * We store positions offset by +1 so that 0 means "no entry".
-	 */
 	uint32_t stored = state->hash_table[hash];
-
-	/* Store current position in hash table (save position modulo 64K) */
-	/* Save pos+1 so that 0 remains sentinel for "no previous" */
-	state->hash_table[hash] = (uint16_t) (((pos & 0xFFFF) + 1) & 0xFFFF);
-
-	/* No previous match at this hash */
+	state->hash_table[hash] = cur + 1;
 	if (stored == 0) {
 		return 0;
 	}
-
-	/* Recover actual stored position (subtract the +1) */
-	uint32_t chain_pos = (uint32_t) (stored - 1);
-
-	/* Don't look back too far (distance measured in window indices) */
-	const uint32_t max_dist = 32768;
-	if (pos > chain_pos + max_dist) {
+	uint32_t match = stored - 1;
+	uint32_t dist = cur - match;
+	/* Only the last window_size bytes are still in the window */
+	if (dist == 0 || dist > state->window_size) {
 		return 0;
 	}
-
-	/* Find longest match */
-	uint32_t best_len = 0;
-	*match_pos = 0;
-
-	/* Limit match search for better performance */
-	const int max_chain_length = (state->level >= 8)? 4096: (state->level >= 5)? 512
-		: (state->level >= 3)? 128
-										: 32;
-
-	int chain_len = max_chain_length;
-
-	/* Search for matches */
-	while (chain_pos > 0 && chain_len-- > 0) {
-		/* Quick check for 3-byte match at start.
-		 * The previous occurrence is located in the circular sliding window at
-		 * index `chain_pos & window_mask`. Compare bytes in the window to the
-		 * input buffer `data`.
-		 */
-		uint32_t win_idx = chain_pos & state->window_mask;
-		if (state->window[win_idx] == data[0] &&
-			state->window[(win_idx + 1) & state->window_mask] == data[1] &&
-			state->window[(win_idx + 2) & state->window_mask] == data[2]) {
-
-			/* Count matching bytes */
-			uint32_t len = 3;
-			while (len < max_len &&
-				state->window[(win_idx + len) & state->window_mask] == data[len]) {
-				len++;
-			}
-
-			/* Update best match if better */
-			if (len > best_len) {
-				best_len = len;
-				*match_pos = chain_pos;
-
-				/* Stop if we found a "good enough" match */
-				if (len >= max_len) {
-					break;
-				}
-			}
+	/* Bytes before cur are in the window; an overlapping match (dist < len)
+	 * continues into the input itself, exactly as the decoder copies it */
+	uint32_t len = 0;
+	while (len < max_len) {
+		uint32_t src = match + len;
+		uint8_t b = (len < dist)? state->window[src & state->window_mask]: data[len - dist];
+		if (b != data[len]) {
+			break;
 		}
-
-		/* In a full implementation we'd use a proper chain, but for simplicity
-		 * we'll just terminate the search as the code is intended to be minimal */
-		break; /* End the chain search after first match */
+		len++;
 	}
-
-	return best_len;
+	if (len < 3) {
+		return 0;
+	}
+	*distance = dist;
+	return len;
 }
 
 /* Write bits to output buffer */
@@ -240,7 +195,7 @@ int deflateInit2(z_stream *strm, int level, int method, int windowBits, int memL
 	/* Allocate hash table - size depends on window size */
 	state->hash_size = 1 << (abs_windowBits - 3); /* Smaller than window for memory efficiency */
 	state->hash_mask = state->hash_size - 1;
-	state->hash_table = (uint16_t *)calloc (state->hash_size, sizeof (uint16_t));
+	state->hash_table = (uint32_t *)calloc (state->hash_size, sizeof (uint32_t));
 	if (!state->hash_table) {
 		free (state->window);
 		free (state);
@@ -250,7 +205,7 @@ int deflateInit2(z_stream *strm, int level, int method, int windowBits, int memL
 	/* Initialize state */
 	state->level = level;
 	state->is_last_block = 0;
-	state->window_pos = 0;
+	state->pos = 0;
 	state->bit_buffer = 0;
 	state->bits_in_buffer = 0;
 
@@ -351,13 +306,13 @@ int deflate(z_stream *strm, int flush) {
 			}
 
 			/* Look for a match */
-			uint32_t match_pos = 0;
+			uint32_t distance = 0;
 			uint32_t max_look_ahead = strm->avail_in > 258? 258: strm->avail_in;
 			uint32_t match_len = 0;
 
 			/* Skip match search for level < 3 or not enough data */
 			if (state->level >= 3 && max_look_ahead >= 3) {
-				match_len = find_longest_match (state, strm->next_in, state->window_pos, max_look_ahead, &match_pos);
+				match_len = find_longest_match (state, strm->next_in, max_look_ahead, &distance);
 			}
 
 			if (match_len >= 3) {
@@ -388,9 +343,12 @@ int deflate(z_stream *strm, int flush) {
 						length_code = 277 + ((match_len - 67) >> 4);
 						extra_bits = 4;
 					}
-				} else {
+				} else if (match_len < 258) {
 					length_code = 281 + ((match_len - 131) >> 5);
 					extra_bits = 5;
+				} else {
+					length_code = 285; /* 258 has its own code, not 284 + 31 */
+					extra_bits = 0;
 				}
 
 				/* Write length code */
@@ -406,9 +364,6 @@ int deflate(z_stream *strm, int flush) {
 						((1 << extra_bits) - 1);
 					write_bits (strm, state, extra_value, extra_bits);
 				}
-
-				/* Calculate distance */
-				uint32_t distance = state->window_pos - match_pos;
 
 				/* Determine distance code */
 				uint16_t distance_code;
@@ -496,8 +451,8 @@ int deflate(z_stream *strm, int flush) {
 				/* Update input position and window */
 				for (uint32_t i = 0; i < match_len; i++) {
 					/* Add to sliding window */
-					state->window[state->window_pos] = *strm->next_in;
-					state->window_pos = (state->window_pos + 1) & state->window_mask;
+					state->window[state->pos & state->window_mask] = *strm->next_in;
+					state->pos++;
 
 					/* Update input position */
 					strm->next_in++;
@@ -517,8 +472,8 @@ int deflate(z_stream *strm, int flush) {
 				write_huffman_code (strm, state, state->literals.codes[literal], state->literals.lengths[literal]);
 
 				/* Update input position and window */
-				state->window[state->window_pos] = literal;
-				state->window_pos = (state->window_pos + 1) & state->window_mask;
+				state->window[state->pos & state->window_mask] = literal;
+				state->pos++;
 
 				strm->next_in++;
 				strm->avail_in--;

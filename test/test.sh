@@ -342,6 +342,12 @@ test_deflate_unzip_compat() {
 	unzip -v test.zip | grep "Defl" >/dev/null || error "comp.txt was not deflated"
 	unzip -t test.zip || error "unzip rejects otezip deflate data"
 	unzip -p test.zip comp.txt | cmp -s - comp.txt || error "unzip output mismatch"
+	# Larger than the 32 KiB window, so matches must handle the wrap
+	seq 1 30000 > big.txt
+	$MZ -c big.zip big.txt -z deflate || error "otezip failed for big.txt"
+	unzip -v big.zip | grep "Defl" >/dev/null || error "big.txt was not deflated"
+	unzip -t big.zip || error "unzip rejects otezip deflate data over 32 KiB"
+	unzip -p big.zip big.txt | cmp -s - big.txt || error "unzip output mismatch over 32 KiB"
 	fini
 }
 
