@@ -1667,6 +1667,9 @@ static void otezip_write_end_of_central_directory(FILE *fp, uint32_t num_entries
 zip_source_t *zip_source_buffer(zip_t *za, const void *data, zip_uint64_t len, int freep) {
 	(void)za;
 	zip_source_t *src = (zip_source_t *)malloc (sizeof (zip_source_t));
+	if (!src) {
+		return NULL; /* data stays owned by the caller */
+	}
 	src->buf = data;
 	src->len = len;
 	src->freep = freep;

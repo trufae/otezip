@@ -1,24 +1,13 @@
 #include <stdint.h>
 #include <time.h>
 
-#if defined(_WIN32) || defined(_WIN64)
-/* Ensure we have thread-safe fallback for localtime on Windows builds */
-#include <time.h>
-#endif
-
-/* Provide a small portable wrapper for thread-safe localtime when possible.
- * On POSIX systems prefer `localtime_r`; on Windows or when not available,
- * fall back to `localtime ()` and copy the result into the caller buffer. */
+/* Thread-safe localtime: localtime_s on Windows, localtime_r elsewhere */
 static struct tm *otezip_localtime_r(const time_t *t, struct tm *out) {
-	/* Portable fallback: use non-reentrant `localtime ()` and copy the result.
-	 * This avoids implicit declaration issues on platforms that don't expose
-	 * `localtime_r` while remaining simple for this small utility. */
-	struct tm *tmp = localtime (t);
-	if (!tmp) {
-		return NULL;
-	}
-	*out = *tmp;
-	return out;
+#if defined(_WIN32) || defined(_WIN64)
+	return localtime_s (out, t) == 0? out: NULL;
+#else
+	return localtime_r (t, out);
+#endif
 }
 
 static inline int dim(int value, int min, int max) {
@@ -30,18 +19,8 @@ static void otezip_get_dostime(uint16_t *dos_time, uint16_t *dos_date) {
 	time_t now = time (NULL);
 	struct tm tm_buf;
 	struct tm *tm_ptr = NULL;
-
-	/* Prefer reentrant version when available */
-	if (now != (time_t)-1 && otezip_localtime_r (&now, &tm_buf) != NULL) {
-		tm_ptr = &tm_buf;
-	}
-	if (!tm_ptr && now != (time_t)-1) {
-		struct tm *tmp = localtime (&now);
-		if (tmp) {
-			/* copy into stack buffer to have a consistent pointer */
-			tm_buf = *tmp;
-			tm_ptr = &tm_buf;
-		}
+	if (now != (time_t)-1) {
+		tm_ptr = otezip_localtime_r (&now, &tm_buf);
 	}
 
 	/* Default to DOS epoch start if anything fails */

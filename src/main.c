@@ -597,7 +597,14 @@ static int extract_all(const char *path) {
 			wrote += (size_t)n;
 			remain -= (size_t)n;
 		}
-		close (fd);
+		if (close (fd) != 0 && remain == 0) {
+			fprintf (stderr, "Write error for %s: %s\n", fname_sanitized, strerror (errno));
+			remain = 1;
+		}
+		if (remain != 0) {
+			/* Don't leave a truncated file behind */
+			unlink (fname_sanitized);
+		}
 
 		/* Save size before closing – zip_fclose () frees the zip_file_t */
 		size_t entry_size = (size_t)zf->size;

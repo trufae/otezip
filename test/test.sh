@@ -400,6 +400,21 @@ test_exit_codes() {
 	fini
 }
 
+test_write_error_cleanup() {
+	init
+	echo "[***] Testing that a failed write leaves no partial file"
+	dd if=/dev/urandom of=big.bin bs=1k count=100 2>/dev/null
+	$MZ -c test.zip big.bin -z store >/dev/null || error "otezip -c failed"
+	mkdir data && cd data
+	# Cap file size at 5 KiB so write() fails with EFBIG instead of a signal
+	if (trap '' XFSZ; ulimit -f 10; $MZ -x ../test.zip); then
+		error "failed write did not fail"
+	fi
+	[ ! -e big.bin ] || error "partial big.bin left behind"
+	cd ..
+	fini
+}
+
 test_strip_policy_symlinks() {
 	init
 	echo "[***] Testing that -Pstrip does not write through symlinks"
@@ -463,6 +478,7 @@ test_append || exit 1
 test_cli_option_order || exit 1
 test_strip_policy_symlinks || exit 1
 test_exit_codes || exit 1
+test_write_error_cleanup || exit 1
 test_empty_files || exit 1
 test_binary_file || exit 1
 test_large_random_and_fallback || exit 1
