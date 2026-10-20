@@ -451,7 +451,7 @@ static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out
 	 * global `otezip_ignore_zipbomb` flag is set by the caller (CLI override).
 	 * We compute allowed = comp_size * ratio + slack and compare against the
 	 * declared uncompressed size. Use 64-bit math to avoid overflow. */
-	if (!otezip_ignore_zipbomb && e->comp_size > 0) {
+	if (!otezip_ignore_zipbomb) {
 		uint64_t allowed = (uint64_t)e->comp_size * otezip_max_expansion_ratio;
 		allowed += otezip_max_expansion_slack;
 		if ((uint64_t)e->uncomp_size > allowed) {

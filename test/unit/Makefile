@@ -4,7 +4,7 @@ CFLAGS += -I../../src/include
 LDFLAGS ?=
 
 # Define test targets
-TESTS = test_deflate test_mzip_deflate test_lzma test_zstd test_lzfse test_empty_zip
+TESTS = test_deflate test_mzip_deflate test_lzma test_zstd test_lzfse test_empty_zip test_zipbomb
 
 all: $(TESTS)
 
