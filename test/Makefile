@@ -1,5 +1,5 @@
 all:
-	$(MAKE) -C unit
+	$(MAKE) -C unit run
 	@rm -rf tmp
 	@sh test.sh
 	@rm -rf tmp
