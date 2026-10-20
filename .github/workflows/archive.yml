@@ -22,3 +22,8 @@ jobs:
           meson compile -C build
       - name: Test archive creation
         run: python test/test_cli_create.py build/otezip${{ runner.os == 'Windows' && '.exe' || '' }}
+      - name: Diagnose published Windows 0.5.0 binary
+        if: runner.os == 'Windows'
+        run: |
+          python -c "import urllib.request; urllib.request.urlretrieve('https://github.com/trufae/otezip/releases/download/0.5.0/otezip-windows.exe', 'release.exe')"
+          python test/test_cli_create.py release.exe
