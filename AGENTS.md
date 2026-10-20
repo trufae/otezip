@@ -13,7 +13,7 @@
 - Install/uninstall: `make install` / `make uninstall`
 - Run tests: `make -C test` (builds unit tests, runs integration script)
 - Quick usage examples:
-  - Create: `./otezip -c out.zip file1 file2 -z1` (deflate)
+  - Create: `./otezip -c out.zip file1 file2 -z deflate` (options may go before or after the files)
   - List: `./otezip -l out.zip`
   - Extract: `./otezip -x out.zip`
 

@@ -123,7 +123,7 @@ static void usage(void) {
 	"Options:");
 
 	/* Show compression options based on what's enabled in config */
-	puts ("  -z <method>  Use compression method (default: deflate if available, else store)");
+	puts ("  -z <method>, -z<method>  Use compression method (default: deflate if available, else store)");
 #ifdef OTEZIP_ENABLE_STORE
 	puts ("      store     Store files without compression");
 #endif
@@ -151,6 +151,8 @@ static void usage(void) {
 	"      allow             - allow unsafe extraction (use with caution)\n");
 	puts ("  --verify-crc    Verify CRC32 when extracting and fail on mismatch\n");
 	puts ("  --ignore-zipbomb  Ignore zipbomb expansion checks and allow large claimed uncompressed sizes (dangerous)\n");
+	puts ("  -f, --force     Overwrite existing files when extracting\n"
+	"  --              Treat all following arguments as file names\n");
 }
 
 static int list_files(const char *path) {
@@ -919,118 +921,95 @@ int main(int argc, char **argv) {
 
 	const char *zip_path = argv[2];
 
-	/* Process additional options */
-	int i;
-	int filter_count = 0;
-	char **files_to_add = NULL;
+	/* Parse options and collect file arguments in a single pass, so options
+	 * may appear anywhere after the archive name. "--" ends option parsing. */
+	char **files_to_add = (char **)calloc (argc, sizeof (char *));
 	int num_files = 0;
-
-	if (mode_create || mode_append) {
-		/* Count actual files vs option flags */
-		files_to_add = &argv[3];
-		num_files = argc - 3;
-
-		for (i = 3; i < argc; i++) {
-			if (strcmp (argv[i], "-z") == 0) {
-				filter_count += 2; // -z and its argument
-			}
-		}
-		num_files -= filter_count;
+	if (!files_to_add) {
+		fprintf (stderr, "Error: out of memory\n");
+		return 1;
 	}
-
-	/* Parse compression method */
+	int i;
+	int only_files = 0;
 	for (i = 3; i < argc; i++) {
-		if (strcmp (argv[i], "-z") == 0) {
-			if (i + 1 >= argc) {
-				fprintf (stderr, "Error: -z requires a method argument\n");
-				return 1;
+		const char *arg = argv[i];
+		if (only_files || arg[0] != '-' || arg[1] == '\0') {
+			files_to_add[num_files++] = argv[i];
+			continue;
+		}
+		if (strcmp (arg, "--") == 0) {
+			only_files = 1;
+		} else if (strncmp (arg, "-z", 2) == 0) {
+			/* -z <method> or -z<method> */
+			const char *name = arg + 2;
+			if (*name == '\0') {
+				if (i + 1 >= argc) {
+					fprintf (stderr, "Error: -z requires a method argument\n");
+					free (files_to_add);
+					return 1;
+				}
+				name = argv[++i];
 			}
-			int method = otezip_method_from_string (argv[i + 1]);
+			int method = otezip_method_from_string (name);
 			if (method == -1) {
-				fprintf (stderr, "Error: unknown compression method '%s'\n", argv[i + 1]);
+				fprintf (stderr, "Error: unknown compression method '%s'\n", name);
+				free (files_to_add);
 				return 1;
 			}
 			compression_method = method;
-			i++; /* skip the method argument */
-		}
-	}
-
-	/* Parse extraction policy option: -P<policy> or --policy=<policy>
-	 * Supported: reject (default), strip, allow
-	 */
-	for (i = 3; i < argc; i++) {
-		const char *arg = argv[i];
-		const char *val = NULL;
-		if (strncmp (arg, "-P", 2) == 0) {
-			val = arg + 2;
-			if (*val == '\0' && i + 1 < argc) {
+		} else if (strncmp (arg, "-P", 2) == 0 || strncmp (arg, "--policy=", 9) == 0) {
+			/* -P<policy>, -P <policy> or --policy=<policy> */
+			const char *val = (arg[1] == 'P')? arg + 2: arg + 9;
+			if (*val == '\0' && arg[1] == 'P' && i + 1 < argc) {
 				val = argv[++i];
 			}
-		} else if (strncmp (arg, "--policy=", 9) == 0) {
-			val = arg + 9;
-		}
-		if (!val) {
-			continue;
-		}
-		if (strcmp (val, "reject") == 0 || strcmp (val, "0") == 0) {
-			g_extract_policy = POLICY_REJECT;
-		} else if (strcmp (val, "strip") == 0 || strcmp (val, "1") == 0) {
-			g_extract_policy = POLICY_STRIP;
-		} else if (strcmp (val, "allow") == 0 || strcmp (val, "2") == 0) {
-			g_extract_policy = POLICY_ALLOW;
-		} else {
-			fprintf (stderr, "Unknown policy: %s\n", val);
-			return 1;
-		}
-	}
-
-	/* Parse CRC verification option: --verify-crc */
-	for (i = 3; i < argc; i++) {
-		if (argv[i] && strcmp (argv[i], "--verify-crc") == 0) {
+			if (strcmp (val, "reject") == 0 || strcmp (val, "0") == 0) {
+				g_extract_policy = POLICY_REJECT;
+			} else if (strcmp (val, "strip") == 0 || strcmp (val, "1") == 0) {
+				g_extract_policy = POLICY_STRIP;
+			} else if (strcmp (val, "allow") == 0 || strcmp (val, "2") == 0) {
+				g_extract_policy = POLICY_ALLOW;
+			} else {
+				fprintf (stderr, "Unknown policy: %s\n", val);
+				free (files_to_add);
+				return 1;
+			}
+		} else if (strcmp (arg, "--verify-crc") == 0) {
 			/* enable strict CRC verification in the mzip backend */
 			otezip_verify_crc = 1;
-		}
-	}
-
-	/* Parse zipbomb ignore option: --ignore-zipbomb (explicit override) */
-	for (i = 3; i < argc; i++) {
-		if (strcmp (argv[i], "--ignore-zipbomb") == 0) {
+		} else if (strcmp (arg, "--ignore-zipbomb") == 0) {
 			/* explicit, dangerous override: allow archives that claim huge
 			 * uncompressed sizes. This bypasses internal safety checks. */
 			otezip_ignore_zipbomb = 1;
-		}
-	}
-
-	/* Parse force option: -f or --force (allow overwriting existing files) */
-	for (i = 3; i < argc; i++) {
-		if (strcmp (argv[i], "-f") == 0 || strcmp (argv[i], "--force") == 0) {
+		} else if (strcmp (arg, "-f") == 0 || strcmp (arg, "--force") == 0) {
+			/* allow overwriting existing files */
 			g_force = 1;
+		} else {
+			fprintf (stderr, "Error: unknown option '%s'\n", arg);
+			free (files_to_add);
+			return 1;
 		}
 	}
 
+	if ((mode_list || mode_extract) && num_files > 0) {
+		fprintf (stderr, "Error: unexpected argument '%s'\n", files_to_add[0]);
+		free (files_to_add);
+		return 1;
+	}
+
+	int ret = 1;
 	if (mode_list) {
-		if (argc < 3) {
-			usage ();
-			return 1;
-		}
-		return list_files (zip_path);
-	}
-	if (mode_extract) {
-		if (argc < 3) {
-			usage ();
-			return 1;
-		}
-		return extract_all (zip_path);
-	}
-	if (mode_create || mode_append) {
-		if (argc < 4) {
+		ret = list_files (zip_path);
+	} else if (mode_extract) {
+		ret = extract_all (zip_path);
+	} else if (mode_create || mode_append) {
+		if (num_files == 0) {
 			fprintf (stderr, "Error: No files specified to %s.\n", mode_create? "create archive with": "add to archive");
 			usage ();
-			return 1;
+		} else {
+			ret = create_or_add_files (zip_path, files_to_add, num_files, mode_create, compression_method);
 		}
-		return create_or_add_files (zip_path, files_to_add, num_files, mode_create, compression_method);
 	}
-
-	usage ();
-	return 1;
+	free (files_to_add);
+	return ret;
 }

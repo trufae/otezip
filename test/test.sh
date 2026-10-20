@@ -366,6 +366,22 @@ test_nested_paths() {
 	fini
 }
 
+test_cli_option_order() {
+	init
+	echo "[***] Testing options before, between and after file names"
+	for ARGS in "-z store hello.txt world.txt" "hello.txt -z store world.txt" "-zstore hello.txt world.txt"; do
+		rm -f test.zip
+		$MZ -c test.zip $ARGS || error "otezip -c $ARGS failed"
+		[ "$(unzip -Z1 test.zip | tr '\n' ' ')" = "hello.txt world.txt " ] || error "wrong entries for: $ARGS"
+		[ "$(unzip -v test.zip | grep -c Stored)" = 2 ] || error "-z store ignored for: $ARGS"
+	done
+	if $MZ -c bad.zip hello.txt --bogus 2>/dev/null; then
+		error "unknown option accepted"
+	fi
+	[ ! -f bad.zip ] || error "archive created despite unknown option"
+	fini
+}
+
 test_append() {
 	init
 	echo "[***] Testing appending entries to existing archives"
@@ -397,6 +413,7 @@ test_append() {
 test_deflate_unzip_compat || exit 1
 test_nested_paths || exit 1
 test_append || exit 1
+test_cli_option_order || exit 1
 test_empty_files || exit 1
 test_binary_file || exit 1
 test_large_random_and_fallback || exit 1
