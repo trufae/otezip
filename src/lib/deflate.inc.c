@@ -28,43 +28,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ------------- API Constants (compatible with zlib) ------------- */
-
-/* Return codes */
-#define Z_OK 0
-#define Z_STREAM_END 1
-#define Z_NEED_DICT 2
-#define Z_ERRNO (-1)
-#define Z_STREAM_ERROR (-2)
-#define Z_DATA_ERROR (-3)
-#define Z_MEM_ERROR (-4)
-#define Z_BUF_ERROR (-5)
-#define Z_VERSION_ERROR (-6)
-
-#define Z_DEFLATED 8
-
-/* Flush values */
-#define Z_NO_FLUSH 0
-#define Z_PARTIAL_FLUSH 1
-#define Z_SYNC_FLUSH 2
-#define Z_FULL_FLUSH 3
-#define Z_FINISH 4
-
-/* Strategy values */
-#define Z_FILTERED 1
-#define Z_HUFFMAN_ONLY 2
-#define Z_RLE 3
-#define Z_FIXED 4
-#define Z_DEFAULT_STRATEGY 0
-
-/* Compression level */
-#define Z_NO_COMPRESSION 0
-#define Z_BEST_SPEED 1
-#define Z_BEST_COMPRESSION 9
-#define Z_DEFAULT_COMPRESSION (-1)
-
-/* Window bits */
-#define MAX_WBITS 15 /* 32K window size */
+/* zlib-compatible constants, z_stream and prototypes */
+#include "../include/otezip/zlib.h"
 
 /* ------------- Data Structures ------------- */
 
@@ -75,30 +40,6 @@ static inline unsigned long compressBound(unsigned long sourceLen) {
 	unsigned long bound = sourceLen + extra + 11u;
 	return (bound < sourceLen)? sourceLen: bound;
 }
-
-/* Unified z_stream definition */
-#include "../include/otezip/zstream.h"
-
-/* ------------- Function Prototypes ------------- */
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-/* Forward declarations */
-int inflateInit2(z_stream *strm, int windowBits);
-int inflateInit2_(z_stream *strm, int windowBits, const char *version, int stream_size);
-int inflate(z_stream *strm, int flush);
-int inflateEnd(z_stream *strm);
-
-int deflateInit2(z_stream *strm, int level, int method, int windowBits, int memLevel, int strategy);
-int deflateInit2_(z_stream *strm, int level, int method, int windowBits, int memLevel, int strategy, const char *version, int stream_size);
-int deflate(z_stream *strm, int flush);
-int deflateEnd(z_stream *strm);
-
-#ifdef __cplusplus
-}
-#endif
 
 /* ------------- Implementation ------------- */
 #ifdef MDEFLATE_IMPLEMENTATION

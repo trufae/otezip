@@ -25,25 +25,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ------------- API Constants (compatible with zlib) ------------- */
+/* ------------- API Constants ------------- */
 
-/* Return codes (from zlib for compatibility) */
-#define Z_OK 0
-#define Z_STREAM_END 1
-#define Z_NEED_DICT 2
-#define Z_ERRNO (-1)
-#define Z_STREAM_ERROR (-2)
-#define Z_DATA_ERROR (-3)
-#define Z_MEM_ERROR (-4)
-#define Z_BUF_ERROR (-5)
-#define Z_VERSION_ERROR (-6)
-
-/* Flush values */
-#define Z_NO_FLUSH 0
-#define Z_PARTIAL_FLUSH 1
-#define Z_SYNC_FLUSH 2
-#define Z_FULL_FLUSH 3
-#define Z_FINISH 4
+/* zlib-compatible constants and z_stream */
+#include "../include/otezip/zlib.h"
 
 /* LZMA-specific constants */
 #define LZMA_MAGIC 0x5D

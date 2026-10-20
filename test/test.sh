@@ -415,6 +415,18 @@ test_write_error_cleanup() {
 	fini
 }
 
+test_fifo_target() {
+	init
+	echo "[***] Testing that -f does not block on a FIFO in place of a file"
+	$MZ -c test.zip hello.txt -z store >/dev/null || error "otezip -c failed"
+	mkdir data && mkfifo data/hello.txt
+	# A blocking open would hang; the alarm kills it after 10 seconds
+	(cd data && perl -e 'alarm 10; exec @ARGV' $MZ -x ../test.zip -f)
+	[ $? -eq 1 ] || error "extracting over a FIFO did not fail cleanly"
+	[ -p data/hello.txt ] || error "FIFO was replaced"
+	fini
+}
+
 test_strip_policy_symlinks() {
 	init
 	echo "[***] Testing that -Pstrip does not write through symlinks"
@@ -479,6 +491,7 @@ test_cli_option_order || exit 1
 test_strip_policy_symlinks || exit 1
 test_exit_codes || exit 1
 test_write_error_cleanup || exit 1
+test_fifo_target || exit 1
 test_empty_files || exit 1
 test_binary_file || exit 1
 test_large_random_and_fallback || exit 1

@@ -29,36 +29,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ------------- API Constants (compatible with zlib) ------------- */
+/* ------------- API Constants ------------- */
 
-/* Return codes (from zlib for compatibility) */
-#define Z_OK 0
-#define Z_STREAM_END 1
-#define Z_NEED_DICT 2
-#define Z_ERRNO (-1)
-#define Z_STREAM_ERROR (-2)
-#define Z_DATA_ERROR (-3)
-#define Z_MEM_ERROR (-4)
-#define Z_BUF_ERROR (-5)
-#define Z_VERSION_ERROR (-6)
-
-/* Flush values */
-#define Z_NO_FLUSH 0
-#define Z_PARTIAL_FLUSH 1
-#define Z_SYNC_FLUSH 2
-#define Z_FULL_FLUSH 3
-#define Z_FINISH 4
-
-/* Strategy values */
-#define Z_DEFAULT_STRATEGY 0
-
-/* Compression level */
-#define Z_NO_COMPRESSION 0
-#define Z_BEST_SPEED 1
-#define Z_BEST_COMPRESSION 9
-#ifndef Z_DEFAULT_COMPRESSION
-#define Z_DEFAULT_COMPRESSION 1
-#endif
+/* zlib-compatible constants and z_stream */
+#include "../include/otezip/zlib.h"
 
 /* ZSTD-specific constants */
 #define ZSTD_MAGIC_NUMBER 0xFD2FB528 /* Magic number for Zstandard frame */

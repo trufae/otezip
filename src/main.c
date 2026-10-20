@@ -19,25 +19,7 @@
 #include <stdint.h>
 #include "include/otezip/config.h"
 #include "include/otezip/zip.h"
-#include "include/otezip/zstream.h"
-
-/* Deflate/inflate API constants and functions from otezip.c */
-#define Z_OK 0
-#define Z_STREAM_END 1
-#define Z_BUF_ERROR (-5)
-#define Z_NO_FLUSH 0
-#define Z_FINISH 4
-#define Z_DEFLATED 8
-#define Z_DEFAULT_COMPRESSION (-1)
-#define Z_DEFAULT_STRATEGY 0
-#define MAX_WBITS 15
-
-extern int inflateInit2(z_stream *strm, int windowBits);
-extern int inflate(z_stream *strm, int flush);
-extern int inflateEnd(z_stream *strm);
-extern int deflateInit2(z_stream *strm, int level, int method, int windowBits, int memLevel, int strategy);
-extern int deflate(z_stream *strm, int flush);
-extern int deflateEnd(z_stream *strm);
+#include "include/otezip/zlib.h" /* deflate/inflate from otezip.c */
 
 #include <limits.h>
 #include <sys/stat.h>
@@ -52,6 +34,11 @@ extern int deflateEnd(z_stream *strm);
 #else
 #error "O_NOFOLLOW is required to extract safely"
 #endif
+#endif
+
+/* O_NONBLOCK keeps a forced overwrite from blocking on a FIFO; Windows has none */
+#ifndef O_NONBLOCK
+#define O_NONBLOCK 0
 #endif
 
 /* Ensure O_BINARY is available for binary-safe extraction on Windows. */
@@ -443,6 +430,124 @@ static int ensure_parent_dirs(const char *path) {
 	return 0;
 }
 
+/* Open path for writing an extracted file: create it exclusively, or with -f
+ * truncate an existing regular file (never through a symlink unless the
+ * policy allows it). Returns the descriptor or -1 after printing why. */
+static int open_output(const char *path, mode_t mode) {
+	int fd = open (path, O_WRONLY | O_CREAT | O_EXCL | O_BINARY, mode);
+	if (fd < 0) {
+		if (errno != EEXIST) {
+			fprintf (stderr, "Cannot create %s: %s\n", path, strerror (errno));
+			return -1;
+		}
+		if (!g_force) {
+			fprintf (stderr, "Skipping existing file (use -f to overwrite): %s\n", path);
+			return -1;
+		}
+		struct stat pst;
+		if (OTEZIP_LSTAT (path, &pst) == 0 && S_ISLNK (pst.st_mode) && !follow_symlinks ()) {
+			fprintf (stderr, "Refusing to overwrite symlink: %s\n", path);
+			return -1;
+		}
+		/* O_NONBLOCK: opening a FIFO without a reader would block forever */
+		fd = open (path, O_WRONLY | O_TRUNC | O_NOFOLLOW | O_NONBLOCK | O_BINARY);
+		if (fd < 0) {
+			fprintf (stderr, "Cannot open for overwrite %s: %s\n", path, strerror (errno));
+			return -1;
+		}
+	}
+	/* Ensure we didn't end up writing to a special file */
+	struct stat st;
+	if (fstat (fd, &st) != 0) {
+		fprintf (stderr, "Failed to stat %s\n", path);
+		close (fd);
+		return -1;
+	}
+	if (!S_ISREG (st.st_mode)) {
+		fprintf (stderr, "Refusing to write non-regular file %s\n", path);
+		close (fd);
+		return -1;
+	}
+	/* Apply safe permissions (masking out SUID/SGID/sticky by using 0777 mask) */
+	if (OTEZIP_FCHMOD (fd, mode & 0777) != 0) {
+		/* Non-fatal: warn but continue */
+		fprintf (stderr, "Warning: failed to set permissions on %s: %s\n", path, strerror (errno));
+	}
+	return fd;
+}
+
+/* Write all of data to fd; returns 0 on success */
+static int write_all(int fd, const uint8_t *data, size_t size, const char *path) {
+	while (size > 0) {
+		unsigned int len = (size > UINT_MAX)? UINT_MAX: (unsigned int)size;
+		ssize_t n = write (fd, data, len);
+		if (n < 0) {
+			if (errno == EINTR) {
+				continue;
+			}
+			fprintf (stderr, "Write error for %s: %s\n", path, strerror (errno));
+			return -1;
+		}
+		data += n;
+		size -= (size_t)n;
+	}
+	return 0;
+}
+
+/* Extract entry i (already opened as zf); returns 1 on failure */
+static int extract_entry(zip_t *za, zip_uint64_t i, zip_file_t *zf) {
+	const struct otezip_entry *entry = &((struct otezip_entry *)za->entries)[i]; /* internal */
+	const char *raw_name = entry->name;
+	char path[PATH_MAX];
+	if (sanitize_extract_path (raw_name, path, sizeof (path)) != 0) {
+		fprintf (stderr, "Skipping suspicious entry: %s\n", raw_name? raw_name: "(null)");
+		return 1;
+	}
+
+	/* If entry denotes a directory (name ends with '/'), create it */
+	size_t rlen = raw_name? strlen (raw_name): 0;
+	if (rlen > 0 && raw_name[rlen - 1] == '/') {
+		if (ensure_parent_dirs (path) != 0) {
+			fprintf (stderr, "Failed to create directory for %s\n", path);
+			return 1;
+		}
+		if (OTEZIP_MKDIR (path, 0755) != 0 && errno != EEXIST) {
+			fprintf (stderr, "Failed to create directory %s\n", path);
+			return 1;
+		}
+		return 0;
+	}
+
+	if (ensure_parent_dirs (path) != 0) {
+		fprintf (stderr, "Cannot ensure parent dirs for %s\n", path);
+		return 1;
+	}
+
+	/* Mode from the central directory external attributes, masked to 0777
+	 * to avoid applying SUID/SGID/sticky from the archive */
+	mode_t mode = (mode_t) ((entry->external_attr >> 16) & 0777);
+	if (mode == 0) {
+		mode = 0644; /* fallback */
+	}
+	int fd = open_output (path, mode);
+	if (fd < 0) {
+		return 1;
+	}
+	int ok = write_all (fd, (const uint8_t *)zf->data, zf->size, path) == 0;
+	if (close (fd) != 0 && ok) {
+		fprintf (stderr, "Write error for %s: %s\n", path, strerror (errno));
+		ok = 0;
+	}
+	if (!ok) {
+		/* Don't leave a truncated file behind */
+		unlink (path);
+		fprintf (stderr, "Failed to fully write %s\n", path);
+		return 1;
+	}
+	printf ("Extracted %s (%lu bytes)\n", path, (unsigned long)zf->size);
+	return 0;
+}
+
 static int extract_all(const char *path) {
 	int err = 0;
 	zip_t *za = zip_open (path, ZIP_RDONLY, &err);
@@ -460,161 +565,8 @@ static int extract_all(const char *path) {
 			failures++;
 			continue;
 		}
-
-		const char *raw_name = ((struct otezip_entry *)za->entries)[i].name; /* internal */
-		char fname_sanitized[PATH_MAX];
-		if (sanitize_extract_path (raw_name, fname_sanitized, sizeof (fname_sanitized)) != 0) {
-			fprintf (stderr, "Skipping suspicious entry: %s\n", raw_name? raw_name: "(null)");
-			zip_fclose (zf);
-			failures++;
-			continue;
-		}
-
-		/* If entry denotes a directory (name ends with '/'), create it */
-		size_t rlen = raw_name? strlen (raw_name): 0;
-		if (rlen > 0 && raw_name[rlen - 1] == '/') {
-			if (ensure_parent_dirs (fname_sanitized) != 0) {
-				fprintf (stderr, "Failed to create directory for %s\n", fname_sanitized);
-				failures++;
-			} else if (OTEZIP_MKDIR (fname_sanitized, 0755) != 0 && errno != EEXIST) {
-				fprintf (stderr, "Failed to create directory %s\n", fname_sanitized);
-				failures++;
-			}
-			zip_fclose (zf);
-			continue;
-		}
-
-		if (ensure_parent_dirs (fname_sanitized) != 0) {
-			fprintf (stderr, "Cannot ensure parent dirs for %s\n", fname_sanitized);
-			zip_fclose (zf);
-			failures++;
-			continue;
-		}
-
-		/* Avoid overwriting existing files unless force (-f) is specified. */
-		struct stat pst;
-		if (OTEZIP_LSTAT (fname_sanitized, &pst) == 0) {
-			if (!g_force) {
-				fprintf (stderr, "Skipping existing file (use -f to overwrite): %s\n", fname_sanitized);
-				zip_fclose (zf);
-				failures++;
-				continue;
-			}
-			/* If force is set and path is a symlink, reject unless policy allows */
-			if (S_ISLNK (pst.st_mode) && !follow_symlinks ()) {
-				fprintf (stderr, "Refusing to overwrite symlink: %s\n", fname_sanitized);
-				zip_fclose (zf);
-				failures++;
-				continue;
-			}
-		}
-
-		/* Determine safe mode from central directory external attributes.
-		 * Mask to 0777 to avoid applying SUID/SGID/sticky from archive. */
-		uint32_t external_attr = 0;
-		/* access internal entry data safely */
-		struct otezip_entry *entry = &((struct otezip_entry *)za->entries)[i];
-		external_attr = entry->external_attr;
-		mode_t desired_mode = (mode_t) ((external_attr >> 16) & 0777);
-		if (desired_mode == 0) {
-			desired_mode = 0644; /* fallback */
-		}
-
-		/* Open the output file atomically: try O_CREAT|O_EXCL first to avoid
-		 * TOCTOU overwrite races. If it exists and force is requested, open with
-		 * O_TRUNC to overwrite. Use low-level descriptors and write () to avoid
-		 * stdio buffering issues. */
-		int fd = -1;
-		int open_flags = O_WRONLY | O_CREAT | O_EXCL;
-		fd = open (fname_sanitized, open_flags | O_BINARY, desired_mode);
-		if (fd < 0) {
-			if (errno == EEXIST) {
-				if (!g_force) {
-					fprintf (stderr, "Skipping existing file (use -f to overwrite): %s\n", fname_sanitized);
-					zip_fclose (zf);
-					failures++;
-					continue;
-				}
-				/* Force path: open for write/truncate but ensure it's not a symlink */
-				if (OTEZIP_LSTAT (fname_sanitized, &pst) == 0 && S_ISLNK (pst.st_mode) && !follow_symlinks ()) {
-					fprintf (stderr, "Refusing to overwrite symlink: %s\n", fname_sanitized);
-					zip_fclose (zf);
-					failures++;
-					continue;
-				}
-				fd = open (fname_sanitized, O_WRONLY | O_TRUNC | O_NOFOLLOW | O_BINARY);
-				if (fd < 0) {
-					fprintf (stderr, "Cannot open for overwrite %s: %s\n", fname_sanitized, strerror (errno));
-					zip_fclose (zf);
-					failures++;
-					continue;
-				}
-			} else {
-				fprintf (stderr, "Cannot create %s: %s\n", fname_sanitized, strerror (errno));
-				zip_fclose (zf);
-				failures++;
-				continue;
-			}
-		}
-
-		/* After creating/opening, ensure we didn't follow a symlink to a special file. */
-		struct stat st2;
-		if (fstat (fd, &st2) != 0) {
-			fprintf (stderr, "Failed to stat %s\n", fname_sanitized);
-			close (fd);
-			zip_fclose (zf);
-			failures++;
-			continue;
-		}
-		if (!S_ISREG (st2.st_mode)) {
-			fprintf (stderr, "Refusing to write non-regular file %s\n", fname_sanitized);
-			close (fd);
-			zip_fclose (zf);
-			failures++;
-			continue;
-		}
-
-		/* Apply safe permissions (masking out SUID/SGID/sticky by using 0777 mask) */
-		if (OTEZIP_FCHMOD (fd, desired_mode & 0777) != 0) {
-			/* Non-fatal: warn but continue */
-			fprintf (stderr, "Warning: failed to set permissions on %s: %s\n", fname_sanitized, strerror (errno));
-		}
-
-		/* Write the file content */
-		size_t wrote = 0;
-		const uint8_t *data = (const uint8_t *)zf->data;
-		size_t remain = zf->size;
-		while (remain > 0) {
-			unsigned int wlen = (remain > UINT_MAX) ? UINT_MAX : (unsigned int)remain;
-			ssize_t n = write (fd, data + wrote, wlen);
-			if (n < 0) {
-				if (errno == EINTR) {
-					continue;
-				}
-				fprintf (stderr, "Write error for %s: %s\n", fname_sanitized, strerror (errno));
-				break;
-			}
-			wrote += (size_t)n;
-			remain -= (size_t)n;
-		}
-		if (close (fd) != 0 && remain == 0) {
-			fprintf (stderr, "Write error for %s: %s\n", fname_sanitized, strerror (errno));
-			remain = 1;
-		}
-		if (remain != 0) {
-			/* Don't leave a truncated file behind */
-			unlink (fname_sanitized);
-		}
-
-		/* Save size before closing – zip_fclose () frees the zip_file_t */
-		size_t entry_size = (size_t)zf->size;
+		failures += extract_entry (za, i, zf);
 		zip_fclose (zf);
-		if (remain == 0) {
-			printf ("Extracted %s (%lu bytes)\n", fname_sanitized, (unsigned long)entry_size);
-		} else {
-			fprintf (stderr, "Failed to fully write %s\n", fname_sanitized);
-			failures++;
-		}
 	}
 
 	zip_close (za);
@@ -949,9 +901,6 @@ int main(int argc, char **argv) {
 		mode_create = 1;
 	} else if (strcmp (argv[1], "-a") == 0) {
 		mode_append = 1;
-	} else if (strcmp (argv[1], "-v") == 0) {
-		printf ("mzip version %s\n", OTEZIP_VERSION);
-		return 0;
 	} else {
 		usage ();
 		return 1;
