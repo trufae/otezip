@@ -345,8 +345,24 @@ test_deflate_unzip_compat() {
 	fini
 }
 
+test_nested_paths() {
+	init
+	echo "[***] Testing extraction of nested directories"
+	mkdir -p dir/sub
+	printf "deep\n" > dir/sub/f.txt
+	zip -r test.zip dir || error "zip failed"
+	mkdir data && cd data
+	$MZ -x ../test.zip || error "otezip -x failed"
+	[ -f dir/sub/f.txt ] || error "dir/sub/f.txt not extracted at the right path"
+	cmp -s dir/sub/f.txt ../dir/sub/f.txt || error "dir/sub/f.txt mismatch"
+	[ -z "$(find . -name 'f.txt' ! -path './dir/sub/f.txt')" ] || error "mangled paths created"
+	cd ..
+	fini
+}
+
 # Run new tests
 test_deflate_unzip_compat || exit 1
+test_nested_paths || exit 1
 test_empty_files || exit 1
 test_binary_file || exit 1
 test_large_random_and_fallback || exit 1

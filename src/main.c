@@ -311,7 +311,7 @@ static int sanitize_extract_path(const char *name, char *out, size_t outlen) {
 		while (*p && *p != '/') {
 			p++;
 		}
-		/* temporarily terminate segment */
+		/* terminate segment */
 		char saved = *p;
 		*p = '\0';
 		if (strcmp (start, "") == 0 || strcmp (start, ".") == 0) {
@@ -334,11 +334,8 @@ static int sanitize_extract_path(const char *name, char *out, size_t outlen) {
 		if (saved == '\0') {
 			break;
 		}
-		*p = saved;
-		/* move past '/' */
-		if (*p == '/') {
-			p++;
-		}
+		/* keep the segment terminated (segments[] points into tmp), move past '/' */
+		p++;
 	}
 
 	if (segc == 0) {
