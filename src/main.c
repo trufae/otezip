@@ -602,46 +602,48 @@ static uint8_t *inflate_buffer(const uint8_t *input_data, size_t input_size, siz
 	strm.avail_out = UINT_CLAMP (alloc);
 	int ok = 0;
 
-	while (1) {
-		int ret = inflate (&strm, Z_NO_FLUSH);
-		if (ret == Z_STREAM_END) {
-			ok = 1;
-			break;
-		}
-		if (ret == Z_BUF_ERROR) {
-			if (strm.avail_in == 0) {
-				size_t consumed = (size_t)(strm.next_in - input_data);
-				if (consumed < input_size) {
-					strm.avail_in = UINT_CLAMP (input_size - consumed);
-					continue;
-				}
-				if (strm.avail_out > 0) {
-					fprintf (stderr, "inflate failed: truncated input\n");
-					break;
-				}
-			}
+	for (;;) {
+		/* Grow whenever the output is full; inflate may then return Z_OK
+		 * (with a copy pending) as well as Z_BUF_ERROR */
+		if (strm.avail_out == 0) {
 			size_t produced = (size_t)(strm.next_out - buf);
-			if (produced >= alloc) {
+			if (produced < alloc) {
+				strm.avail_out = UINT_CLAMP (alloc - produced);
+			} else {
 				if (alloc > SIZE_MAX / 2) {
 					fprintf (stderr, "Output buffer too large\n");
 					break;
 				}
-				size_t new_alloc = alloc * 2;
-				uint8_t *new_buf = (uint8_t *)realloc (buf, new_alloc);
+				uint8_t *new_buf = (uint8_t *)realloc (buf, alloc * 2);
 				if (!new_buf) {
 					fprintf (stderr, "Out of memory expanding output buffer\n");
 					break;
 				}
 				buf = new_buf;
-				alloc = new_alloc;
+				alloc *= 2;
+				strm.next_out = buf + produced;
+				strm.avail_out = UINT_CLAMP (alloc - produced);
 			}
-			strm.next_out = buf + produced;
-			strm.avail_out = UINT_CLAMP (alloc - produced);
-			continue;
 		}
-		if (ret != Z_OK) {
+		/* Feed the rest of inputs larger than avail_in can hold */
+		if (strm.avail_in == 0) {
+			size_t consumed = (size_t)(strm.next_in - input_data);
+			strm.avail_in = UINT_CLAMP (input_size - consumed);
+		}
+		uLong in_before = strm.total_in;
+		uLong out_before = strm.total_out;
+		int ret = inflate (&strm, Z_NO_FLUSH);
+		if (ret == Z_STREAM_END) {
+			ok = 1;
+			break;
+		}
+		if (ret != Z_OK && ret != Z_BUF_ERROR) {
 			fprintf (stderr, "inflate failed: %d (avail_in=%u avail_out=%u total_out=%lu)\n",
 				ret, strm.avail_in, strm.avail_out, (unsigned long)strm.total_out);
+			break;
+		}
+		if (strm.avail_out > 0 && strm.total_in == in_before && strm.total_out == out_before) {
+			fprintf (stderr, "inflate failed: truncated input\n");
 			break;
 		}
 	}

@@ -427,6 +427,24 @@ test_fifo_target() {
 	fini
 }
 
+test_gunzip() {
+	init
+	echo "[***] Testing gunzip mode"
+	# Output larger than the initial buffer: this used to spin forever
+	head -c 1000000 /dev/zero > zeros.bin
+	gzip -c zeros.bin > zeros.gz || error "gzip failed"
+	perl -e 'alarm 10; exec @ARGV' $MZ -d zeros.gz zeros.out || error "otezip -d failed on a highly compressible file"
+	cmp -s zeros.bin zeros.out || error "gunzip output mismatch"
+	seq 1 20000 | gzip -c > seq.gz || error "gzip failed"
+	perl -e 'alarm 10; exec @ARGV' $MZ -d seq.gz seq.out || error "otezip -d failed on text"
+	seq 1 20000 | cmp -s - seq.out || error "gunzip text mismatch"
+	head -c 1000 seq.gz > trunc.gz
+	if perl -e 'alarm 10; exec @ARGV' $MZ -d trunc.gz trunc.out; then
+		error "truncated gzip input was accepted"
+	fi
+	fini
+}
+
 test_strip_policy_symlinks() {
 	init
 	echo "[***] Testing that -Pstrip does not write through symlinks"
@@ -492,6 +510,7 @@ test_strip_policy_symlinks || exit 1
 test_exit_codes || exit 1
 test_write_error_cleanup || exit 1
 test_fifo_target || exit 1
+test_gunzip || exit 1
 test_empty_files || exit 1
 test_binary_file || exit 1
 test_large_random_and_fallback || exit 1
