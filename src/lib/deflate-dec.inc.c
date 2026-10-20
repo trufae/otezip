@@ -27,6 +27,7 @@ typedef struct {
 	uint8_t *window; /* Sliding window for LZ77 */
 	uint32_t window_size; /* Size of window */
 	uint32_t window_pos; /* Current position in window */
+	uint32_t window_have; /* Bytes of history in window (at most window_size) */
 
 	/* Wrapper handling */
 	wrap_format wrap; /* Wrapper format */
@@ -38,6 +39,15 @@ typedef struct {
 	int pending_distance; /* Distance for the copy */
 	int pending_literal; /* Pending literal byte (-1 if none) */
 } inflate_state;
+
+/* Append a decoded byte to the sliding window */
+static inline void window_put(inflate_state *state, uint8_t byte) {
+	state->window[state->window_pos] = byte;
+	state->window_pos = (state->window_pos + 1) &(state->window_size - 1);
+	if (state->window_have < state->window_size) {
+		state->window_have++;
+	}
+}
 
 /* Get a bit from the input stream */
 
@@ -314,8 +324,7 @@ static int read_uncompressed_block(z_stream *strm, inflate_state *state) {
 
 	/* Also store in window */
 	for (uint16_t i = 0; i < len; i++) {
-		state->window[state->window_pos] = strm->next_out[- (len - i)];
-		state->window_pos = (state->window_pos + 1) &(state->window_size - 1);
+		window_put (state, strm->next_out[- (len - i)]);
 	}
 
 	return Z_OK;
@@ -502,6 +511,7 @@ int inflateInit2(z_stream *strm, int windowBits) {
 	/* Initialize state */
 	state->window_size = window_size;
 	state->window_pos = 0;
+	state->window_have = 0;
 	state->bit_buffer = 0;
 	state->bits_in_buffer = 0;
 	state->final_block = 0;
@@ -529,9 +539,7 @@ static int do_copy_from_window(z_stream *strm, inflate_state *state, int length,
 		strm->avail_out--;
 		strm->total_out++;
 
-		/* Add to window */
-		state->window[state->window_pos] = byte;
-		state->window_pos = (state->window_pos + 1) &(state->window_size - 1);
+		window_put (state, byte);
 		length--;
 	}
 
@@ -594,9 +602,7 @@ int inflate(z_stream *strm, int flush) {
 		*strm->next_out++ = (uint8_t)state->pending_literal;
 		strm->avail_out--;
 		strm->total_out++;
-		/* Add to window */
-		state->window[state->window_pos] = (uint8_t)state->pending_literal;
-		state->window_pos = (state->window_pos + 1) &(state->window_size - 1);
+		window_put (state, (uint8_t)state->pending_literal);
 		state->pending_literal = -1;
 	}
 
@@ -708,9 +714,7 @@ int inflate(z_stream *strm, int flush) {
 					strm->avail_out--;
 					strm->total_out++;
 
-					/* Add to window */
-					state->window[state->window_pos] = (uint8_t)code;
-					state->window_pos = (state->window_pos + 1) &(state->window_size - 1);
+					window_put (state, (uint8_t)code);
 				} else if (code == 256) {
 					/* End of block */
 					state->state = 0; /* Back to block header */
@@ -788,7 +792,7 @@ int inflate(z_stream *strm, int flush) {
 					}
 
 					/* Copy bytes from window */
-					if ((uint32_t)distance > state->window_size) {
+					if ((uint32_t)distance > state->window_have) {
 						return Z_DATA_ERROR; /* Distance too far back */
 					}
 

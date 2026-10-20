@@ -1,0 +1,94 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "../../src/include/otezip/zip.h"
+
+/* Stored entry "a" plus a second central directory header with a bad signature */
+static const uint8_t bad_cd_zip[] = {
+	0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x86, 0xa6, 0x10, 0x36, 0x05, 0x00, 0x00, 0x00, 0x05, 0x00,
+	0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x61, 0x68, 0x65, 0x6c, 0x6c, 0x6f,
+	0x50, 0x4b, 0x01, 0x02, 0x1e, 0x03, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x86, 0xa6, 0x10, 0x36, 0x05, 0x00, 0x00, 0x00,
+	0x05, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x61, 0x58,
+	0x58, 0x58, 0x58, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x4b, 0x05,
+	0x06, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x5d, 0x00, 0x00,
+	0x00, 0x24, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
+static const char not_a_zip[] = "just some notes, not a zip archive at all\n";
+
+static int write_file(const char *path, const void *buf, size_t len) {
+	FILE *fp = fopen (path, "wb");
+	if (!fp) {
+		perror ("fopen");
+		return 1;
+	}
+	size_t n = fwrite (buf, 1, len, fp);
+	if (fclose (fp) != 0 || n != len) {
+		perror ("fwrite");
+		return 1;
+	}
+	return 0;
+}
+
+static int file_equals(const char *path, const void *buf, size_t len) {
+	uint8_t tmp[512];
+	FILE *fp = fopen (path, "rb");
+	if (!fp) {
+		return 0;
+	}
+	size_t n = fread (tmp, 1, sizeof (tmp), fp);
+	fclose (fp);
+	return n == len && !memcmp (tmp, buf, len);
+}
+
+/* Opening a broken file for append must fail without crashing or writing to it */
+static int check_append_open(const char *what, const void *buf, size_t len) {
+	char path[] = "/tmp/otezip-badzip-XXXXXX";
+	int fd = mkstemp (path);
+	if (fd < 0) {
+		perror ("mkstemp");
+		return 1;
+	}
+	close (fd);
+	if (write_file (path, buf, len) != 0) {
+		unlink (path);
+		return 1;
+	}
+	int failed = 0;
+	int err = 0;
+	zip_t *za = zip_open (path, ZIP_CREATE, &err);
+	if (za) {
+		fprintf (stderr, "FAIL: %s: zip_open succeeded\n", what);
+		zip_close (za);
+		failed = 1;
+	} else if (err == 0) {
+		fprintf (stderr, "FAIL: %s: no error code reported\n", what);
+		failed = 1;
+	}
+	if (!file_equals (path, buf, len)) {
+		fprintf (stderr, "FAIL: %s: file was modified\n", what);
+		failed = 1;
+	}
+	unlink (path);
+	return failed;
+}
+
+int main(void) {
+	int failed = 0;
+	failed |= check_append_open ("malformed central directory", bad_cd_zip, sizeof (bad_cd_zip));
+	failed |= check_append_open ("plain text file", not_a_zip, strlen (not_a_zip));
+	if (failed) {
+		return 1;
+	}
+	puts ("TEST PASSED: Failed append opens leave the file untouched.");
+	return 0;
+}
