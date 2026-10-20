@@ -366,6 +366,19 @@ test_nested_paths() {
 	fini
 }
 
+test_strip_policy_symlinks() {
+	init
+	echo "[***] Testing that -Pstrip does not write through symlinks"
+	mkdir -p src/link && printf "pwned\n" > src/link/pwn.txt && printf "new\n" > src/victim
+	(cd src && zip -q ../test.zip link/pwn.txt victim) || error "zip failed"
+	mkdir -p data outside && printf "original\n" > outside/victim
+	ln -s ../outside data/link && ln -s ../outside/victim data/victim
+	(cd data && $MZ -x ../test.zip -Pstrip -f)
+	[ ! -e outside/pwn.txt ] || error "-Pstrip wrote through a symlinked directory"
+	[ "$(cat outside/victim)" = "original" ] || error "-Pstrip -f overwrote a symlink target"
+	fini
+}
+
 test_cli_option_order() {
 	init
 	echo "[***] Testing options before, between and after file names"
@@ -414,6 +427,7 @@ test_deflate_unzip_compat || exit 1
 test_nested_paths || exit 1
 test_append || exit 1
 test_cli_option_order || exit 1
+test_strip_policy_symlinks || exit 1
 test_empty_files || exit 1
 test_binary_file || exit 1
 test_large_random_and_fallback || exit 1

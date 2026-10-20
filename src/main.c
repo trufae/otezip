@@ -9,6 +9,10 @@
  */
 
 #define _POSIX_C_SOURCE 200809L
+#if defined(__APPLE__)
+/* _POSIX_C_SOURCE alone hides O_NOFOLLOW in macOS <fcntl.h> */
+#define _DARWIN_C_SOURCE
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,9 +45,13 @@ extern int deflateEnd(z_stream *strm);
 #include <errno.h>
 #include <fcntl.h>
 
-/* Ensure O_NOFOLLOW is defined - on Windows it's not available, so define as 0 */
+/* O_NOFOLLOW guards overwrites against symlink swaps; only Windows lacks it */
 #ifndef O_NOFOLLOW
+#if defined(_WIN32) || defined(_WIN64)
 #define O_NOFOLLOW 0
+#else
+#error "O_NOFOLLOW is required to extract safely"
+#endif
 #endif
 
 /* Ensure O_BINARY is available for binary-safe extraction on Windows. */
@@ -271,6 +279,11 @@ static int create_or_add_files(const char *path, char **files, int num_files, in
 
 static int g_extract_policy = POLICY_REJECT;
 
+/* Only the allow policy writes through symlinks; strip only rewrites '..' */
+static int follow_symlinks(void) {
+	return g_extract_policy == POLICY_ALLOW;
+}
+
 static int sanitize_extract_path(const char *name, char *out, size_t outlen) {
 	if (!name || !*name) {
 		return -1;
@@ -377,12 +390,9 @@ static int ensure_parent_dirs(const char *path) {
 			struct stat st;
 			if (OTEZIP_LSTAT (tmp, &st) == 0) {
 				/* If the path exists, reject symlinks when policy says so */
-				if (S_ISLNK (st.st_mode)) {
-					if (g_extract_policy == POLICY_REJECT) {
-						tmp[i] = '/';
-						return -1;
-					}
-					/* POLICY_ALLOW: continue but do not create directories through symlinks */
+				if (S_ISLNK (st.st_mode) && !follow_symlinks ()) {
+					tmp[i] = '/';
+					return -1;
 				}
 				if (!S_ISDIR (st.st_mode) && !S_ISLNK (st.st_mode)) {
 					tmp[i] = '/';
@@ -399,11 +409,9 @@ static int ensure_parent_dirs(const char *path) {
 								tmp[i] = '/';
 								return -1;
 							}
-							if (S_ISLNK (st.st_mode)) {
-								if (g_extract_policy == POLICY_REJECT) {
-									tmp[i] = '/';
-									return -1;
-								}
+							if (S_ISLNK (st.st_mode) && !follow_symlinks ()) {
+								tmp[i] = '/';
+								return -1;
 							}
 							if (!S_ISDIR (st.st_mode)) {
 								tmp[i] = '/';
@@ -478,7 +486,7 @@ static int extract_all(const char *path) {
 				continue;
 			}
 			/* If force is set and path is a symlink, reject unless policy allows */
-			if (S_ISLNK (pst.st_mode) && g_extract_policy == POLICY_REJECT) {
+			if (S_ISLNK (pst.st_mode) && !follow_symlinks ()) {
 				fprintf (stderr, "Refusing to overwrite symlink: %s\n", fname_sanitized);
 				zip_fclose (zf);
 				continue;
@@ -511,7 +519,7 @@ static int extract_all(const char *path) {
 					continue;
 				}
 				/* Force path: open for write/truncate but ensure it's not a symlink */
-				if (OTEZIP_LSTAT (fname_sanitized, &pst) == 0 && S_ISLNK (pst.st_mode) && g_extract_policy == POLICY_REJECT) {
+				if (OTEZIP_LSTAT (fname_sanitized, &pst) == 0 && S_ISLNK (pst.st_mode) && !follow_symlinks ()) {
 					fprintf (stderr, "Refusing to overwrite symlink: %s\n", fname_sanitized);
 					zip_fclose (zf);
 					continue;
