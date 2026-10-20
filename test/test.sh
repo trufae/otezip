@@ -334,7 +334,19 @@ test_large_file() {
      fini
  }
 
+test_deflate_unzip_compat() {
+	init
+	echo "[***] Testing otezip deflate output is valid for unzip"
+	printf "hello hello hello world\n" > comp.txt
+	$MZ -c test.zip comp.txt -z deflate || error "otezip failed for -z deflate"
+	unzip -v test.zip | grep "Defl" >/dev/null || error "comp.txt was not deflated"
+	unzip -t test.zip || error "unzip rejects otezip deflate data"
+	unzip -p test.zip comp.txt | cmp -s - comp.txt || error "unzip output mismatch"
+	fini
+}
+
 # Run new tests
+test_deflate_unzip_compat || exit 1
 test_empty_files || exit 1
 test_binary_file || exit 1
 test_large_random_and_fallback || exit 1

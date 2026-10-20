@@ -183,9 +183,13 @@ static void init_fixed_huffman_deflate(deflate_state *state) {
 	state->distances.count = 32;
 }
 
-/* Write a Huffman code to output */
+/* Write a Huffman code to output (deflate packs Huffman codes MSB-first) */
 static int write_huffman_code(z_stream *strm, deflate_state *state, uint16_t code, uint8_t code_length) {
-	return write_bits (strm, state, code, code_length);
+	uint32_t rev = 0;
+	for (int i = 0; i < code_length; i++) {
+		rev = (rev << 1) | ((code >> i) & 1);
+	}
+	return write_bits (strm, state, rev, code_length);
 }
 
 /* ----------- Main encoder API functions ----------- */
