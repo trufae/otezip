@@ -38,6 +38,7 @@ typedef struct {
 	int pending_length; /* Remaining bytes to copy */
 	int pending_distance; /* Distance for the copy */
 	int pending_literal; /* Pending literal byte (-1 if none) */
+	uint32_t stored_left; /* Bytes of the current stored block still to copy */
 } inflate_state;
 
 /* Append a decoded byte to the sliding window */
@@ -278,8 +279,8 @@ static int read_dynamic_huffman(z_stream *strm, inflate_state *state) {
 	return Z_OK;
 }
 
-/* Read an uncompressed block */
-static int read_uncompressed_block(z_stream *strm, inflate_state *state) {
+/* Read a stored block header; its data is copied by copy_stored_data */
+static int read_stored_header(z_stream *strm, inflate_state *state) {
 	/* Skip any remaining bits in current byte */
 	state->bits_in_buffer = 0;
 
@@ -287,47 +288,42 @@ static int read_uncompressed_block(z_stream *strm, inflate_state *state) {
 	if (strm->avail_in < 4) {
 		return Z_DATA_ERROR; /* Not enough input */
 	}
-
 	uint16_t len = strm->next_in[0] | (strm->next_in[1] << 8);
 	uint16_t nlen = strm->next_in[2] | (strm->next_in[3] << 8);
-
 	strm->next_in += 4;
 	strm->avail_in -= 4;
 	strm->total_in += 4;
 
-	/* Verify length */
 	/* Compare length with bitwise complement of nlen while avoiding
 	 * signed/unsigned promotion warnings by casting nlen to uint16_t
 	 * before applying ~. */
 	if (len != (uint16_t) (~ (uint16_t)nlen)) {
 		return Z_DATA_ERROR; /* Length check failed */
 	}
-
-	/* Check if we have enough input */
-	if (strm->avail_in < len) {
-		return Z_DATA_ERROR; /* Not enough input */
-	}
-
-	/* Check if we have enough output space */
-	if (strm->avail_out < len) {
-		return Z_BUF_ERROR; /* Not enough output space */
-	}
-
-	/* Copy data directly to output */
-	memcpy (strm->next_out, strm->next_in, len);
-	strm->next_in += len;
-	strm->avail_in -= len;
-	strm->total_in += len;
-	strm->next_out += len;
-	strm->avail_out -= len;
-	strm->total_out += len;
-
-	/* Also store in window */
-	for (uint16_t i = 0; i < len; i++) {
-		window_put (state, strm->next_out[- (len - i)]);
-	}
-
+	state->stored_left = len;
 	return Z_OK;
+}
+
+/* Copy as much stored data as input and output allow */
+static void copy_stored_data(z_stream *strm, inflate_state *state) {
+	uint32_t n = state->stored_left;
+	if (n > strm->avail_in) {
+		n = strm->avail_in;
+	}
+	if (n > strm->avail_out) {
+		n = strm->avail_out;
+	}
+	memcpy (strm->next_out, strm->next_in, n);
+	for (uint32_t i = 0; i < n; i++) {
+		window_put (state, strm->next_in[i]);
+	}
+	strm->next_in += n;
+	strm->avail_in -= n;
+	strm->total_in += n;
+	strm->next_out += n;
+	strm->avail_out -= n;
+	strm->total_out += n;
+	state->stored_left -= n;
 }
 
 /* Initialize fixed Huffman tables with correct canonical codes */
@@ -640,12 +636,12 @@ int inflate(z_stream *strm, int flush) {
 			/* Process based on block type */
 			switch (state->btype) {
 			case BLOCK_UNCOMPRESSED:
-				ret = read_uncompressed_block (strm, state);
+				ret = read_stored_header (strm, state);
 				if (ret != Z_OK) {
 					return ret;
 				}
-				/* Move to next block header */
-				state->state = 0;
+				/* Copy the stored data; empty blocks go straight to the next header */
+				state->state = state->stored_left? 3: 0;
 				break;
 
 			case BLOCK_FIXED:
@@ -806,6 +802,17 @@ int inflate(z_stream *strm, int flush) {
 					/* Invalid code */
 					return Z_DATA_ERROR;
 				}
+			}
+			break;
+
+		case 3: /* Stored block data, resumable across calls */
+			copy_stored_data (strm, state);
+			if (state->stored_left == 0) {
+				state->state = 0; /* Move to next block header */
+			} else if (strm->avail_out == 0) {
+				return Z_OK; /* Need more output space */
+			} else {
+				return Z_DATA_ERROR; /* Input ends inside the block */
 			}
 			break;
 

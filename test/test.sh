@@ -438,6 +438,11 @@ test_gunzip() {
 	seq 1 20000 | gzip -c > seq.gz || error "gzip failed"
 	perl -e 'alarm 10; exec @ARGV' $MZ -d seq.gz seq.out || error "otezip -d failed on text"
 	seq 1 20000 | cmp -s - seq.out || error "gunzip text mismatch"
+	# Random data is stored uncompressed, in blocks larger than one output chunk
+	dd if=/dev/urandom of=rand.bin bs=1k count=300 2>/dev/null
+	gzip -c rand.bin > rand.gz || error "gzip failed"
+	perl -e 'alarm 10; exec @ARGV' $MZ -d rand.gz rand.out || error "otezip -d failed on stored blocks"
+	cmp -s rand.bin rand.out || error "gunzip stored block mismatch"
 	head -c 1000 seq.gz > trunc.gz
 	if perl -e 'alarm 10; exec @ARGV' $MZ -d trunc.gz trunc.out; then
 		error "truncated gzip input was accepted"

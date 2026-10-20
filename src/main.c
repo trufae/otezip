@@ -573,10 +573,11 @@ static int extract_all(const char *path) {
 	return failures? 1: 0;
 }
 
-/* Inflate (decompress) a buffer with auto-detect gzip/zlib header.
- * Returns a malloc'd buffer on success (caller frees), NULL on failure.
- * Sets *out_size to the decompressed size on success. */
-static uint8_t *inflate_buffer(const uint8_t *input_data, size_t input_size, size_t *out_size) {
+/* Inflate a gzip/zlib buffer (header auto-detected) into fout in fixed
+ * chunks, so memory use does not depend on the decompressed size. The input
+ * stays one buffer: inflate cannot resume a symbol split across calls.
+ * Returns 0 on success and sets *out_size to the decompressed size. */
+static int inflate_to_file(const uint8_t *input_data, size_t input_size, FILE *fout, size_t *out_size) {
 	z_stream strm;
 	memset (&strm, 0, sizeof (strm));
 	strm.next_in = (uint8_t *)input_data;
@@ -584,77 +585,44 @@ static uint8_t *inflate_buffer(const uint8_t *input_data, size_t input_size, siz
 
 	if (inflateInit2 (&strm, MAX_WBITS + 32) != Z_OK) {
 		fprintf (stderr, "inflateInit2 failed\n");
-		return NULL;
+		return -1;
 	}
 
-	size_t alloc = input_size * 4;
-	if (alloc < 65536) {
-		alloc = 65536;
-	}
-	uint8_t *buf = (uint8_t *)malloc (alloc);
-	if (!buf) {
-		fprintf (stderr, "Out of memory for output buffer\n");
-		inflateEnd (&strm);
-		return NULL;
-	}
-
-	strm.next_out = buf;
-	strm.avail_out = UINT_CLAMP (alloc);
+	uint8_t chunk[65536];
 	int ok = 0;
-
 	for (;;) {
-		/* Grow whenever the output is full; inflate may then return Z_OK
-		 * (with a copy pending) as well as Z_BUF_ERROR */
-		if (strm.avail_out == 0) {
-			size_t produced = (size_t)(strm.next_out - buf);
-			if (produced < alloc) {
-				strm.avail_out = UINT_CLAMP (alloc - produced);
-			} else {
-				if (alloc > SIZE_MAX / 2) {
-					fprintf (stderr, "Output buffer too large\n");
-					break;
-				}
-				uint8_t *new_buf = (uint8_t *)realloc (buf, alloc * 2);
-				if (!new_buf) {
-					fprintf (stderr, "Out of memory expanding output buffer\n");
-					break;
-				}
-				buf = new_buf;
-				alloc *= 2;
-				strm.next_out = buf + produced;
-				strm.avail_out = UINT_CLAMP (alloc - produced);
-			}
-		}
 		/* Feed the rest of inputs larger than avail_in can hold */
 		if (strm.avail_in == 0) {
 			size_t consumed = (size_t)(strm.next_in - input_data);
 			strm.avail_in = UINT_CLAMP (input_size - consumed);
 		}
+		strm.next_out = chunk;
+		strm.avail_out = sizeof (chunk);
 		uLong in_before = strm.total_in;
-		uLong out_before = strm.total_out;
 		int ret = inflate (&strm, Z_NO_FLUSH);
+		size_t have = sizeof (chunk) - strm.avail_out;
+		if (have > 0 && fwrite (chunk, 1, have, fout) != have) {
+			fprintf (stderr, "Failed to write output file\n");
+			break;
+		}
 		if (ret == Z_STREAM_END) {
 			ok = 1;
 			break;
 		}
 		if (ret != Z_OK && ret != Z_BUF_ERROR) {
-			fprintf (stderr, "inflate failed: %d (avail_in=%u avail_out=%u total_out=%lu)\n",
-				ret, strm.avail_in, strm.avail_out, (unsigned long)strm.total_out);
+			fprintf (stderr, "inflate failed: %d (avail_in=%u total_out=%lu)\n",
+				ret, strm.avail_in, (unsigned long)strm.total_out);
 			break;
 		}
-		if (strm.avail_out > 0 && strm.total_in == in_before && strm.total_out == out_before) {
+		if (have == 0 && strm.total_in == in_before) {
 			fprintf (stderr, "inflate failed: truncated input\n");
 			break;
 		}
 	}
 
-	*out_size = (size_t)(strm.next_out - buf);
+	*out_size = (size_t)strm.total_out;
 	inflateEnd (&strm);
-	if (!ok) {
-		free (buf);
-		return NULL;
-	}
-	return buf;
+	return ok? 0: -1;
 }
 
 /* Deflate (compress) a buffer with gzip framing.
@@ -730,29 +698,25 @@ static int gunzip_file(const char *input_path, const char *output_path) {
 	}
 	fclose (fin);
 
-	size_t output_size = 0;
-	uint8_t *output_data = inflate_buffer (input_data, input_size, &output_size);
-	free (input_data);
-	if (!output_data) {
-		return 1;
-	}
-
 	FILE *fout = fopen (output_path, "wb");
 	if (!fout) {
 		fprintf (stderr, "Cannot create output file: %s\n", output_path);
-		free (output_data);
+		free (input_data);
 		return 1;
 	}
 
-	if (fwrite (output_data, 1, output_size, fout) != output_size) {
+	size_t output_size = 0;
+	int ret = inflate_to_file (input_data, input_size, fout, &output_size);
+	free (input_data);
+	if (fclose (fout) != 0 && ret == 0) {
 		fprintf (stderr, "Failed to write output file\n");
-		fclose (fout);
-		free (output_data);
+		ret = -1;
+	}
+	if (ret != 0) {
+		/* Don't leave a partial file behind */
+		unlink (output_path);
 		return 1;
 	}
-
-	fclose (fout);
-	free (output_data);
 	printf ("Decompressed %s -> %s (%ld -> %lu bytes)\n",
 		input_path, output_path, fsize, (unsigned long)output_size);
 	return 0;
