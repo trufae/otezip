@@ -29,10 +29,13 @@
 #define OTEZIP_METHOD_DEFLATE  8
 #define OTEZIP_METHOD_LZMA    14
 #define OTEZIP_METHOD_ZSTD    93
+/* Brotli and LZ4 have no APPNOTE IDs; 97 is WavPack and 94 is MP3 there */
 #define OTEZIP_METHOD_BROTLI  97
 #define OTEZIP_METHOD_LZ4     94
-/* LZFSE is not officially in ZIP spec, using Apple-specific range */
-#define OTEZIP_METHOD_LZFSE  100  /* Apple-specific range */
+/* Not in the ZIP spec. Apple reportedly writes LZFSE as 99 (shared with
+ * AE-x encryption), but our minimal codec emits raw blocks without the
+ * "bvx" framing, so its output must not claim Apple's ID */
+#define OTEZIP_METHOD_LZFSE  100
 
 // Compression buffer sizing constants
 #define OTEZIP_LZMA_HEADER_SIZE       13 /* LZMA header size */
