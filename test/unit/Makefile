@@ -4,7 +4,7 @@ CFLAGS += -I../../src/include
 LDFLAGS ?=
 
 # Define test targets
-TESTS = test_deflate test_mzip_deflate test_lzma test_zstd test_lzfse test_empty_zip test_zipbomb test_deflate_reserved test_deflate_dynhdr
+TESTS = test_deflate test_mzip_deflate test_lzma test_zstd test_lzfse test_empty_zip test_zipbomb test_deflate_reserved test_deflate_dynhdr test_append_badzip
 
 all: $(TESTS)
 
@@ -33,6 +33,9 @@ test_empty_zip: test_empty_zip.c ../../src/lib/otezip.c ../../src/include/otezip
 	$(CC) $(CFLAGS) -o $@ $< ../../src/lib/otezip.c $(LDFLAGS)
 
 test_zipbomb: test_zipbomb.c ../../src/lib/otezip.c ../../src/include/otezip/zip.h ../../src/include/otezip/config.h
+	$(CC) $(CFLAGS) -o $@ $< ../../src/lib/otezip.c $(LDFLAGS)
+
+test_append_badzip: test_append_badzip.c ../../src/lib/otezip.c ../../src/include/otezip/zip.h ../../src/include/otezip/config.h
 	$(CC) $(CFLAGS) -o $@ $< ../../src/lib/otezip.c $(LDFLAGS)
 
 clean:

@@ -335,12 +335,11 @@ static int otezip_load_central(zip_t *za) {
 	}
 
 	za->entries = (struct otezip_entry *)calloc (n_entries, sizeof (struct otezip_entry));
-	za->n_entries = n_entries;
-
 	if (!za->entries) {
 		free (cd_buf);
 		return OTEZIP_ERR_READ;
 	}
+	za->n_entries = n_entries;
 
 	size_t off = 0;
 	uint16_t i;
@@ -766,6 +765,9 @@ zip_t *zip_open(const char *path, int flags, int *errorp) {
 					 *errorp = ZIP_ER_NOZIP; /* Unknown error - not a zip */
 				}
 			}
+			/* Never finalize a half-loaded archive: entries may lack names and
+			 * writing a central directory would corrupt the existing file */
+			za->mode = 0;
 			zip_close (za);
 			return NULL;
 		}
