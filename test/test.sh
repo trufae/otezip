@@ -348,6 +348,16 @@ test_deflate_unzip_compat() {
 	unzip -v big.zip | grep "Defl" >/dev/null || error "big.txt was not deflated"
 	unzip -t big.zip || error "unzip rejects otezip deflate data over 32 KiB"
 	unzip -p big.zip big.txt | cmp -s - big.txt || error "unzip output mismatch over 32 KiB"
+	# otezip must read its own output back, whatever bit the stream ends on
+	# (these sizes end with symbols decoded from already buffered bits)
+	for N in 417 2489 3377; do
+		yes abc | head -c $N > rep$N.txt
+		$MZ -c rep.zip rep$N.txt -z deflate >/dev/null || error "otezip failed for rep$N.txt"
+		mkdir data && cd data
+		$MZ -x ../rep.zip >/dev/null || error "otezip -x failed for rep$N.txt"
+		cmp -s rep$N.txt ../rep$N.txt || error "rep$N.txt mismatch"
+		cd .. && rm -rf data rep.zip
+	done
 	fini
 }
 

@@ -6,12 +6,10 @@
 #define MDEFLATE_IMPLEMENTATION
 #include "../../src/lib/deflate.inc.c"
 
-/* Dynamic block with HLIT=286, HDIST=30 (the maximum valid counts) decoding to "a".
- * The trailing 0x00 is padding: the decoder stops once avail_in hits 0 even with
- * bits still buffered, which would reject this stream for an unrelated reason. */
+/* Dynamic block with HLIT=286, HDIST=30 (the maximum valid counts) decoding to "a" */
 static const uint8_t max_counts[] = {
 	0xed, 0xdd, 0x21, 0x09, 0x00, 0x00, 0x00, 0x00,
-	0xa0, 0xad, 0xfe, 0x3f, 0xe1, 0x12, 0x97, 0x08, 0x00
+	0xa0, 0xad, 0xfe, 0x3f, 0xe1, 0x12, 0x97, 0x08
 };
 /* Dynamic blocks declaring too many symbols, code lengths filled with zeros.
  * HLIT=288 HDIST=32 fills exactly 318 lengths, the old ll_lengths[] size, so the

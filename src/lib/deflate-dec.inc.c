@@ -615,8 +615,9 @@ int inflate(z_stream *strm, int flush) {
 	}
 
 	/* Main decompression loop - continue even when avail_out is 0
-	 * to check for end-of-block marker */
-	while (strm->avail_in > 0) {
+	 * to check for end-of-block marker. The last symbols may already sit
+	 * in the bit buffer after the final input byte was loaded. */
+	while (strm->avail_in > 0 || state->bits_in_buffer > 0) {
 		/* Process based on current state */
 		switch (state->state) {
 		case 0: /* Block header */
@@ -818,7 +819,7 @@ int inflate(z_stream *strm, int flush) {
 		}
 
 		/* Check if we should stop */
-		if (flush == Z_FINISH && strm->avail_in == 0) {
+		if (flush == Z_FINISH && strm->avail_in == 0 && state->bits_in_buffer == 0) {
 			if (!state->final_block || state->state != 0) {
 				return Z_BUF_ERROR; /* Need more input to finish */
 			}

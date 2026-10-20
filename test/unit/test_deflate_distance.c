@@ -6,17 +6,14 @@
 #define MDEFLATE_IMPLEMENTATION
 #include "../../src/lib/deflate.inc.c"
 
-/* Each stream ends with a 0x00 pad byte: the decoder stops once avail_in hits 0
- * even with bits still buffered, which would reject them for an unrelated reason. */
-
 /* Fixed block whose first symbol is a length 258 match at distance 32768 */
-static const uint8_t far_32768[] = { 0x1b, 0xbd, 0xff, 0x1f, 0x00, 0x00 };
+static const uint8_t far_32768[] = { 0x1b, 0xbd, 0xff, 0x1f, 0x00 };
 /* Literal 'a', then a length 3 match at distance 2 with only 1 byte of history */
-static const uint8_t far_by_one[] = { 0x4b, 0x04, 0x42, 0x00, 0x00 };
+static const uint8_t far_by_one[] = { 0x4b, 0x04, 0x42, 0x00 };
 /* Literal 'a', then a length 3 match at distance 1: "aaaa" */
-static const uint8_t ok_dist_1[] = { 0x4b, 0x04, 0x02, 0x00, 0x00 };
+static const uint8_t ok_dist_1[] = { 0x4b, 0x04, 0x02, 0x00 };
 /* Stored block "ab", then a fixed block with a length 3 match at distance 2: "ababa" */
-static const uint8_t stored_hist[] = { 0x00, 0x02, 0x00, 0xfd, 0xff, 0x61, 0x62, 0x03, 0x42, 0x00, 0x00 };
+static const uint8_t stored_hist[] = { 0x00, 0x02, 0x00, 0xfd, 0xff, 0x61, 0x62, 0x03, 0x42, 0x00 };
 
 static int run_inflate(const uint8_t *in, size_t in_len, uint8_t *out, size_t out_cap, size_t *out_len) {
 	z_stream strm = { 0 };
