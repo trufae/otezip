@@ -1,9 +1,33 @@
-./otezip
-.cache
-tmp
-./*.zip
-./*.bin
+# Build artifacts
+/otezip
+*.o
+*.a
+*.so
+*.dylib
+*.dSYM/
+/build/
+/builddir/
+
+# Unit test binaries (keep sources)
+test/unit/test_*
+!test/unit/test_*.c
 test/simple_test
 test/verify_deflate
-*.a
-*.o
+
+# Test scratch files
+/tmp/
+/test/tmp/
+/*.zip
+/*.bin
+
+# Patch leftovers
+*.orig
+*.rej
+
+# Editor / OS / tooling
+.DS_Store
+*.swp
+*~
+.cache/
+.pmai
+ailogic-report.md
