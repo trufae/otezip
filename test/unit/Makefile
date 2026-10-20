@@ -4,7 +4,7 @@ CFLAGS += -I../../src/include
 LDFLAGS ?=
 
 # Define test targets
-TESTS = test_deflate test_mzip_deflate test_lzma test_zstd test_lzfse test_empty_zip test_zipbomb test_deflate_reserved test_deflate_dynhdr test_append_badzip test_deflate_distance test_zip_overlap
+TESTS = test_deflate test_mzip_deflate test_lzma test_zstd test_lzfse test_empty_zip test_zipbomb test_deflate_reserved test_deflate_dynhdr test_append_badzip test_deflate_distance test_zip_overlap test_lzma_stream
 
 all: $(TESTS)
 
@@ -27,6 +27,9 @@ test_zstd: test_zstd.c
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 test_lzma: test_lzma.c
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
+test_lzma_stream: test_lzma_stream.c ../../src/lib/lzma-dec.inc.c ../../src/lib/lzma-enc.inc.c
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 test_lzfse: test_lzfse.c

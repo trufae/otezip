@@ -55,22 +55,19 @@
 /* Unified z_stream declaration */
 #include "../include/otezip/zstream.h"
 
-/* LZMA decompression context */
+/* LZMA decompression context. The stream after the header is a sequence of
+ * records: 00 <byte> <count> (run) or 01 <count> <count bytes> (literals). */
 typedef struct {
 	uint8_t properties[LZMA_PROPS_SIZE];
 	uint64_t uncompressed_size;
-	uint8_t *dict_buffer;
-	size_t dict_size;
-	uint8_t *window_buffer;
-	size_t window_size;
-	size_t window_pos;
-	uint32_t current_block_size;
-	int current_block_remaining;
-	int is_last_block;
-
-	/* Work buffers */
-	uint8_t *decompress_buffer;
-	size_t decompress_buffer_size;
+	int header_done;
+	/* Header bytes split across calls are staged here */
+	uint8_t stage[LZMA_HEADER_SIZE];
+	uint32_t stage_len;
+	/* Record whose output did not fit in avail_out yet */
+	int pending_kind; /* 0 none, 1 run, 2 literals */
+	uint8_t pending_byte; /* Byte repeated by a pending run */
+	uint32_t pending_left; /* Bytes still to output for the pending record */
 } lzma_decompress_context;
 
 /* ------------- Function Prototypes ------------- */
@@ -98,62 +95,6 @@ int lzmaDecompressInit2_(z_stream *strm, int windowBits, const char *version, in
 
 /* --- Helper Functions --- */
 
-/* Simple decompression for our LZMA block */
-static int simple_lzma_decompress(const uint8_t *props,
-	const uint8_t *src,
-	size_t src_size,
-	uint8_t *dst,
-	size_t dst_capacity) {
-	if (!props || !src || !dst || src_size == 0) {
-		return 0; /* Invalid inputs */
-	}
-
-	/* We don't actually use the props in this simplified version */
-	(void)props;
-
-	size_t dst_pos = 0;
-	size_t src_pos = 0;
-
-	while (src_pos < src_size) {
-		if (src_pos + 2 >= src_size) {
-			return 0; /* Invalid compressed data */
-		}
-
-		uint8_t marker = src[src_pos++];
-
-		if (marker == 0x00) {
-			/* RLE run */
-			uint8_t byte = src[src_pos++];
-			uint8_t length = src[src_pos++];
-
-			/* Check output capacity */
-			if (dst_pos + length > dst_capacity) {
-				return 0; /* Output overflow */
-			}
-
-			/* Output run */
-			memset (dst + dst_pos, byte, length);
-			dst_pos += length;
-		} else if (marker == 0x01) {
-			/* Literal sequence */
-			uint8_t length = src[src_pos++];
-
-			if (src_pos + length > src_size || dst_pos + length > dst_capacity) {
-				return 0; /* Invalid input or output overflow */
-			}
-
-			/* Copy literals */
-			memcpy (dst + dst_pos, src + src_pos, length);
-			dst_pos += length;
-			src_pos += length;
-		} else {
-			return 0; /* Invalid marker */
-		}
-	}
-
-	return (int)dst_pos; /* Return decompressed size */
-}
-
 /* Read 64-bit little endian integer */
 static uint64_t read_uint64_le(const uint8_t *p) {
 	uint64_t value = 0;
@@ -163,6 +104,42 @@ static uint64_t read_uint64_le(const uint8_t *p) {
 	return value;
 }
 
+/* Output as much of the pending record as fits */
+static void lzma_flush_pending(z_stream *strm, lzma_decompress_context *ctx) {
+	uint32_t n = ctx->pending_left;
+	if (n > strm->avail_out) {
+		n = strm->avail_out;
+	}
+	if (ctx->pending_kind == 2 && n > strm->avail_in) {
+		n = strm->avail_in;
+	}
+	if (ctx->pending_kind == 1) {
+		memset (strm->next_out, ctx->pending_byte, n);
+	} else {
+		memcpy (strm->next_out, strm->next_in, n);
+		strm->next_in += n;
+		strm->avail_in -= n;
+		strm->total_in += n;
+	}
+	strm->next_out += n;
+	strm->avail_out -= n;
+	strm->total_out += n;
+	ctx->pending_left -= n;
+	if (ctx->pending_left == 0) {
+		ctx->pending_kind = 0;
+	}
+}
+
+/* Collect a header into ctx->stage until it holds need bytes; returns 1 once it does */
+static int lzma_stage(z_stream *strm, lzma_decompress_context *ctx, uint32_t need) {
+	while (ctx->stage_len < need && strm->avail_in > 0) {
+		ctx->stage[ctx->stage_len++] = *strm->next_in++;
+		strm->avail_in--;
+		strm->total_in++;
+	}
+	return ctx->stage_len >= need;
+}
+
 /* --- LZMA API Implementation --- */
 
 /* Initialize a decompression stream */
@@ -170,39 +147,13 @@ int lzmaDecompressInit(z_stream *strm) {
 	if (!strm) {
 		return Z_STREAM_ERROR;
 	}
-
-	/* Allocate decompression context */
 	lzma_decompress_context *ctx = (lzma_decompress_context *)calloc (1, sizeof (lzma_decompress_context));
 	if (!ctx) {
 		return Z_MEM_ERROR;
 	}
-
-	/* Initialize context with default values */
-	ctx->window_size = 1 << 16; /* 64KB window by default */
-	ctx->is_last_block = 0;
-	ctx->uncompressed_size = 0;
-
-	/* Allocate window buffer */
-	ctx->window_buffer = (uint8_t *)malloc (ctx->window_size);
-	if (!ctx->window_buffer) {
-		free (ctx);
-		return Z_MEM_ERROR;
-	}
-
-	/* Allocate decompression buffer */
-	ctx->decompress_buffer_size = ctx->window_size;
-	ctx->decompress_buffer = (uint8_t *)malloc (ctx->decompress_buffer_size);
-	if (!ctx->decompress_buffer) {
-		free (ctx->window_buffer);
-		free (ctx);
-		return Z_MEM_ERROR;
-	}
-
-	/* Initialize stream */
 	strm->state = (void *)ctx;
 	strm->total_in = 0;
 	strm->total_out = 0;
-
 	return Z_OK;
 }
 
@@ -211,104 +162,67 @@ int lzmaDecompress(z_stream *strm, int flush) {
 	if (!strm || !strm->state) {
 		return Z_STREAM_ERROR;
 	}
-
 	lzma_decompress_context *ctx = (lzma_decompress_context *)strm->state;
 
-	/* Process LZMA header if this is the first call */
-	if (strm->total_in == 0) {
-		/* Need at least the LZMA header */
-		if (strm->avail_in < LZMA_HEADER_SIZE) {
+	if (!ctx->header_done) {
+		if (!lzma_stage (strm, ctx, LZMA_HEADER_SIZE)) {
+			return flush == Z_FINISH? Z_DATA_ERROR: Z_BUF_ERROR;
+		}
+		memcpy (ctx->properties, ctx->stage, LZMA_PROPS_SIZE);
+		ctx->uncompressed_size = read_uint64_le (ctx->stage + LZMA_PROPS_SIZE);
+		ctx->stage_len = 0;
+		ctx->header_done = 1;
+	}
+
+	for (;;) {
+		if (ctx->pending_kind) {
+			lzma_flush_pending (strm, ctx);
+			if (ctx->pending_kind) {
+				if (strm->avail_out == 0) {
+					return Z_OK; /* Need more output space */
+				}
+				/* Literals cut short by the end of the input */
+				return flush == Z_FINISH? Z_DATA_ERROR: Z_BUF_ERROR;
+			}
+		}
+		if (ctx->uncompressed_size != UINT64_MAX && strm->total_out >= ctx->uncompressed_size) {
+			return Z_STREAM_END;
+		}
+		if (strm->avail_in == 0) {
+			if (ctx->stage_len == 0 && ctx->uncompressed_size == UINT64_MAX && flush == Z_FINISH) {
+				return Z_STREAM_END;
+			}
+			return flush == Z_FINISH? Z_DATA_ERROR: Z_BUF_ERROR;
+		}
+		/* Record header: 00 <byte> <count> or 01 <count> */
+		if (!lzma_stage (strm, ctx, 1)) {
 			return Z_BUF_ERROR;
 		}
-
-		/* Read LZMA properties */
-		memcpy (ctx->properties, strm->next_in, LZMA_PROPS_SIZE);
-
-		/* Read uncompressed size */
-		ctx->uncompressed_size = read_uint64_le (strm->next_in + LZMA_PROPS_SIZE);
-
-		/* Skip header */
-		strm->next_in += LZMA_HEADER_SIZE;
-		strm->avail_in -= LZMA_HEADER_SIZE;
-		strm->total_in += LZMA_HEADER_SIZE;
-	}
-
-	/* If we have remaining data from a previous block, output it first */
-	if (ctx->current_block_remaining > 0) {
-		size_t copy_size = ctx->current_block_remaining;
-		if (copy_size > strm->avail_out) {
-			copy_size = strm->avail_out;
+		uint8_t marker = ctx->stage[0];
+		uint32_t hdr = (marker == 0x00)? 3: (marker == 0x01)? 2: 0;
+		if (hdr == 0) {
+			return Z_DATA_ERROR; /* Invalid marker */
 		}
-
-		/* Copy data to output */
-		memcpy (strm->next_out,
-			ctx->decompress_buffer + (ctx->current_block_size - ctx->current_block_remaining),
-			copy_size);
-
-		/* Update counters */
-		strm->next_out += (uint32_t)copy_size;
-		strm->avail_out -= (uint32_t)copy_size;
-		strm->total_out += (uint32_t)copy_size;
-		ctx->current_block_remaining -= (int)copy_size;
-
-		/* If we filled the output buffer, return for more space */
-		if (strm->avail_out == 0) {
-			return Z_OK;
+		if (!lzma_stage (strm, ctx, hdr)) {
+			return flush == Z_FINISH? Z_DATA_ERROR: Z_BUF_ERROR;
 		}
-	}
-
-	/* Process more input if available */
-	if (strm->avail_in > 0) {
-		/* Try to decompress what we have */
-		size_t decomp_size = simple_lzma_decompress (ctx->properties,
-			strm->next_in,
-			strm->avail_in,
-			ctx->decompress_buffer,
-			ctx->decompress_buffer_size);
-
-		/* If decompression failed, return error */
-		if (decomp_size == 0) {
-			return Z_DATA_ERROR;
-		}
-
-		/* Update input counters */
-		strm->next_in += strm->avail_in;
-		strm->total_in += strm->avail_in;
-		strm->avail_in = 0;
-
-		/* Check if we have enough output space */
-		if (strm->avail_out >= decomp_size) {
-			/* Copy all data to output */
-			memcpy (strm->next_out, ctx->decompress_buffer, decomp_size);
-			strm->next_out += (uint32_t)decomp_size;
-			strm->avail_out -= (uint32_t)decomp_size;
-			strm->total_out += (uint32_t)decomp_size;
+		if (marker == 0x00) {
+			ctx->pending_kind = 1;
+			ctx->pending_byte = ctx->stage[1];
+			ctx->pending_left = ctx->stage[2];
 		} else {
-			/* Store partial data for later */
-			memcpy (strm->next_out, ctx->decompress_buffer, strm->avail_out);
-			ctx->current_block_size = (uint32_t)decomp_size;
-			ctx->current_block_remaining = (int) (decomp_size - strm->avail_out);
-			strm->total_out += strm->avail_out;
-			strm->next_out += strm->avail_out;
-			strm->avail_out = 0;
-			return Z_OK;
+			ctx->pending_kind = 2;
+			ctx->pending_left = ctx->stage[1];
+		}
+		ctx->stage_len = 0;
+		if (ctx->uncompressed_size != UINT64_MAX &&
+			strm->total_out + ctx->pending_left > ctx->uncompressed_size) {
+			return Z_DATA_ERROR; /* More data than the header announced */
+		}
+		if (ctx->pending_left == 0) {
+			ctx->pending_kind = 0;
 		}
 	}
-
-	/* Determine if we're finished */
-	if (ctx->uncompressed_size != 0xFFFFFFFFFFFFFFFF) {
-		/* Known size - check if we've output everything */
-		if (strm->total_out >= ctx->uncompressed_size) {
-			return Z_STREAM_END;
-		}
-	} else {
-		/* Unknown size - check if flush is FINISH and no more input */
-		if (flush == Z_FINISH && strm->avail_in == 0) {
-			return Z_STREAM_END;
-		}
-	}
-
-	return Z_OK;
 }
 
 /* End a decompression stream */
@@ -316,17 +230,8 @@ int lzmaDecompressEnd(z_stream *strm) {
 	if (!strm || !strm->state) {
 		return Z_STREAM_ERROR;
 	}
-
-	lzma_decompress_context *ctx = (lzma_decompress_context *)strm->state;
-
-	/* Free allocated buffers */
-	free (ctx->window_buffer);
-	free (ctx->decompress_buffer);
-
-	/* Free context */
-	free (ctx);
+	free (strm->state);
 	strm->state = NULL;
-
 	return Z_OK;
 }
 
