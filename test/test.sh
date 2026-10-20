@@ -360,9 +360,37 @@ test_nested_paths() {
 	fini
 }
 
+test_append() {
+	init
+	echo "[***] Testing appending entries to existing archives"
+	printf "third\n" > third.txt
+	$MZ -c test.zip hello.txt -z store || error "otezip -c failed"
+	$MZ -a test.zip world.txt -z store || error "otezip -a failed"
+	$MZ -a test.zip third.txt -z store || error "second otezip -a failed"
+	unzip -t test.zip || error "unzip rejects appended archive"
+	# Archive written by zip with a comment after the EOCD record
+	zip -q info.zip hello.txt || error "zip failed"
+	echo "archive comment" | zip -qz info.zip || error "zip -z failed"
+	$MZ -a info.zip world.txt -z store || error "otezip -a on zip archive failed"
+	unzip -t info.zip || error "unzip rejects appended zip archive"
+	for Z in test.zip info.zip; do
+		mkdir data && cd data
+		$MZ -x ../$Z || error "otezip -x $Z failed"
+		cmp -s hello.txt ../hello.txt || error "hello.txt mismatch in $Z"
+		cmp -s world.txt ../world.txt || error "world.txt mismatch in $Z"
+		cd .. && rm -rf data
+	done
+	mkdir data && cd data
+	$MZ -x ../test.zip >/dev/null
+	cmp -s third.txt ../third.txt || error "third.txt mismatch"
+	cd ..
+	fini
+}
+
 # Run new tests
 test_deflate_unzip_compat || exit 1
 test_nested_paths || exit 1
+test_append || exit 1
 test_empty_files || exit 1
 test_binary_file || exit 1
 test_large_random_and_fallback || exit 1

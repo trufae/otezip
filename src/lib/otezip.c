@@ -56,6 +56,19 @@ static int otezip_mkstemp(const char *prefix) {
 #define otezip_mkstemp mkstemp
 #endif
 
+/* Cut the file at the current stream position */
+static int otezip_truncate_here(FILE *fp) {
+	long pos = ftell (fp);
+	if (pos < 0 || fflush (fp) != 0) {
+		return -1;
+	}
+#if defined(_WIN32) || defined(_WIN64)
+	return _chsize_s (_fileno (fp), (__int64)pos) == 0? 0: -1;
+#else
+	return ftruncate (fileno (fp), (off_t)pos);
+#endif
+}
+
 #include "../include/otezip/zip.h"
 #include "../include/otezip/zstream.h"
 #include "time.inc.c"
@@ -272,7 +285,9 @@ static long otezip_find_eocd(FILE *fp, uint8_t *eocd_out /*22+*/, size_t *cd_siz
 }
 
 /* parse central directory into array of otezip_entry */
-static int otezip_load_central(zip_t *za) {
+/* Parse the central directory; *cd_ofs_out gets its offset, where appended
+ * entries must start */
+static int otezip_load_central(zip_t *za, uint32_t *cd_ofs_out) {
 	uint8_t eocd[22];
 	size_t cd_size;
 	uint32_t cd_ofs;
@@ -308,6 +323,7 @@ static int otezip_load_central(zip_t *za) {
 		}
 		za->entries = NULL;
 		za->n_entries = 0;
+		*cd_ofs_out = cd_ofs;
 		return 0;
 	}
 
@@ -391,6 +407,7 @@ static int otezip_load_central(zip_t *za) {
 		off += entry_size;
 	}
 	free (cd_buf);
+	*cd_ofs_out = cd_ofs;
 	return 0;
 }
 
@@ -753,7 +770,8 @@ zip_t *zip_open(const char *path, int flags, int *errorp) {
 	za->fp = fp;
 	if (za->mode == 0 || (exists && ! (flags & ZIP_TRUNCATE))) {
 		/* Load central directory for existing archive */
-		int load_result = otezip_load_central (za);
+		uint32_t cd_ofs = 0;
+		int load_result = otezip_load_central (za, &cd_ofs);
 		if (load_result != 0) {
 			/* Convert internal error codes to libzip error codes */
 			if (errorp) {
@@ -772,8 +790,18 @@ zip_t *zip_open(const char *path, int flags, int *errorp) {
 			return NULL;
 		}
 
-		/* Set next_index for append mode */
 		if (za->mode == 1) {
+			/* New entries overwrite the old central directory, which is
+			 * rewritten after them on close. This seek is also required
+			 * by C before writing to a stream that was last read. */
+			if (fseek (za->fp, (long)cd_ofs, SEEK_SET) != 0) {
+				if (errorp) {
+					*errorp = ZIP_ER_READ;
+				}
+				za->mode = 0;
+				zip_close (za);
+				return NULL;
+			}
 			za->next_index = za->n_entries;
 		}
 	}
@@ -1266,7 +1294,8 @@ static int otezip_finalize_archive(zip_t *za) {
 
 	/* Write end of central directory record */
 	otezip_write_end_of_central_directory (za->fp, (uint32_t)za->n_entries, (uint32_t)cd_size_acc, (uint32_t)cd_offset);
-	return 0;
+	/* Drop leftovers of a longer previous archive (e.g. an old comment) */
+	return otezip_truncate_here (za->fp);
 }
 
 int zip_close(zip_t *za) {
