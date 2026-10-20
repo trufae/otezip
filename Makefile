@@ -36,10 +36,12 @@ test:
 	$(MAKE) -C test
 	rm -rf build
 
+# Tests under ASan and UBSan; undefined behavior aborts the run
+SAN_FLAGS=-fsanitize=address,undefined -fno-sanitize-recover=undefined
 test2:
-	meson build -Db_sanitize=address && ninja -C build
+	meson build -Db_sanitize=address,undefined && ninja -C build
 	cp -f build/otezip ./otezip
-	CFLAGS="-fsanitize=address $(CFLAGS)" $(MAKE) -C test
+	UBSAN_OPTIONS=halt_on_error=1 CFLAGS="$(SAN_FLAGS) $(CFLAGS)" $(MAKE) -C test
 	rm -rf build
 
 asan: clean

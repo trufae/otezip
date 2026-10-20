@@ -948,7 +948,7 @@ zip_int64_t zip_file_add(zip_t *za, const char *name, zip_source_t *src, zip_fla
 	otezip_get_dostime (&e->file_time, &e->file_date);
 
 	/* Set default permissions: 0644 for files */
-	e->external_attr = 0100644 << 16; /* S_IFREG | 0644 << 16 */
+	e->external_attr = (uint32_t)0100644 << 16; /* S_IFREG | 0644, unsigned: 0100644 << 16 overflows int */
 
 	/* Get current position for local header offset */
 	long current_pos = ftell (za->fp);
