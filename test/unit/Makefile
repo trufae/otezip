@@ -4,7 +4,7 @@ CFLAGS += -I../../src/include
 LDFLAGS ?=
 
 # Define test targets
-TESTS = test_deflate test_mzip_deflate test_lzma test_zstd test_lzfse test_empty_zip test_zipbomb test_deflate_reserved
+TESTS = test_deflate test_mzip_deflate test_lzma test_zstd test_lzfse test_empty_zip test_zipbomb test_deflate_reserved test_deflate_dynhdr
 
 all: $(TESTS)
 
@@ -15,6 +15,9 @@ test_mzip_deflate: test_mzip_deflate.c
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 test_deflate_reserved: test_deflate_reserved.c ../../src/lib/deflate-dec.inc.c
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
+test_deflate_dynhdr: test_deflate_dynhdr.c ../../src/lib/deflate-dec.inc.c
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 test_zstd: test_zstd.c

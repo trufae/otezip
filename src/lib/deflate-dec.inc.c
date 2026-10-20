@@ -125,7 +125,7 @@ static int read_dynamic_huffman(z_stream *strm, inflate_state *state) {
 	if (hlit < 0) {
 		return Z_DATA_ERROR;
 	}
-	hlit += 257; /* 257-286 codes */
+	hlit += 257; /* 257-288 codes, only 286 are valid */
 
 	/* Read number of distance codes */
 	int hdist = get_bits (strm, state, 5);
@@ -133,6 +133,9 @@ static int read_dynamic_huffman(z_stream *strm, inflate_state *state) {
 		return Z_DATA_ERROR;
 	}
 	hdist += 1; /* 1-32 codes */
+	if (hlit > 286 || hdist > 30) {
+		return Z_DATA_ERROR; /* Too many length or distance symbols */
+	}
 
 	/* Read number of code length codes */
 	int hclen = get_bits (strm, state, 4);
@@ -162,7 +165,7 @@ static int read_dynamic_huffman(z_stream *strm, inflate_state *state) {
 	}
 
 	/* Read literal/length and distance code lengths */
-#define LL_LENGTHS_MAX (286 + 32)
+#define LL_LENGTHS_MAX (286 + 30)
 	uint8_t ll_lengths[LL_LENGTHS_MAX] = { 0 }; /* Literal/length + distance code lengths */
 	int index = 0;
 	while (index < hlit + hdist && index < LL_LENGTHS_MAX) {
