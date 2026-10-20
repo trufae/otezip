@@ -12,7 +12,7 @@ STANDALONE = test_mzip_deflate test_lzma test_zstd test_lzfse test_deflate_reser
 	test_deflate_stored
 # Tests linked against the library
 LIBRARY = test_empty_zip test_zipbomb test_append_badzip test_zip_overlap test_short_deflate \
-	test_set_file_compression
+	test_set_file_compression test_stream_read
 TESTS = test_deflate $(STANDALONE) $(LIBRARY)
 
 # Known failures from open bugs in BUGSTODO.md (#18, #33, #37). They still run;

@@ -533,7 +533,28 @@ static int extract_entry(zip_t *za, zip_uint64_t i, zip_file_t *zf) {
 	if (fd < 0) {
 		return 1;
 	}
-	int ok = write_all (fd, (const uint8_t *)zf->data, zf->size, path) == 0;
+	/* Stream the entry; decoding and CRC errors surface from zip_fread */
+	uint8_t chunk[65536];
+	unsigned long total = 0;
+	int ok = 1;
+	int read_failed = 0;
+	for (;;) {
+		zip_int64_t n = zip_fread (zf, chunk, sizeof (chunk));
+		if (n < 0) {
+			fprintf (stderr, "Could not read entry %s\n", path);
+			ok = 0;
+			read_failed = 1;
+			break;
+		}
+		if (n == 0) {
+			break;
+		}
+		if (write_all (fd, chunk, (size_t)n, path) != 0) {
+			ok = 0;
+			break;
+		}
+		total += (unsigned long)n;
+	}
 	if (close (fd) != 0 && ok) {
 		fprintf (stderr, "Write error for %s: %s\n", path, strerror (errno));
 		ok = 0;
@@ -541,10 +562,12 @@ static int extract_entry(zip_t *za, zip_uint64_t i, zip_file_t *zf) {
 	if (!ok) {
 		/* Don't leave a truncated file behind */
 		unlink (path);
-		fprintf (stderr, "Failed to fully write %s\n", path);
+		if (!read_failed) {
+			fprintf (stderr, "Failed to fully write %s\n", path);
+		}
 		return 1;
 	}
-	printf ("Extracted %s (%lu bytes)\n", path, (unsigned long)zf->size);
+	printf ("Extracted %s (%lu bytes)\n", path, total);
 	return 0;
 }
 

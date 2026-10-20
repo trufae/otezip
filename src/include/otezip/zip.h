@@ -99,9 +99,10 @@ struct zip {
 };
 
 struct zip_file {
-    uint8_t   *data;   /* complete uncompressed data                 */
-    uint32_t   size;
+    uint8_t   *data;   /* uncompressed data for buffered methods, NULL when streamed */
+    uint32_t   size;   /* uncompressed size                          */
     zip_uint64_t pos;  /* current read position for zip_fread       */
+    void      *stream; /* internal decoder state when streamed        */
 };
 
 struct zip_source {

@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <limits.h>
 #include <string.h>
 #include <fcntl.h>
 #include <time.h>
@@ -468,6 +469,7 @@ typedef struct {
 	int (*enc)(z_stream *strm, int flush);
 	int (*enc_end)(z_stream *strm);
 	size_t (*enc_bound)(size_t in_size); /* output buffer size for in_size bytes */
+	int streams; /* decoder can stop when output is full and resume later */
 } otezip_codec;
 
 #ifdef OTEZIP_ENABLE_DEFLATE
@@ -516,21 +518,21 @@ static size_t otezip_brotli_bound(size_t n) {
 
 static const otezip_codec otezip_codecs[] = {
 #ifdef OTEZIP_ENABLE_DEFLATE
-	{ OTEZIP_METHOD_DEFLATE, otezip_inflate_init, inflate, inflateEnd, otezip_deflate_init, deflate, deflateEnd, otezip_deflate_bound },
+	{ OTEZIP_METHOD_DEFLATE, otezip_inflate_init, inflate, inflateEnd, otezip_deflate_init, deflate, deflateEnd, otezip_deflate_bound, 1 },
 #endif
 #ifdef OTEZIP_ENABLE_ZSTD
-	{ OTEZIP_METHOD_ZSTD, zstdDecompressInit, zstdDecompress, zstdDecompressEnd, otezip_zstd_init, zstdCompress, zstdEnd, otezip_zstd_bound },
+	{ OTEZIP_METHOD_ZSTD, zstdDecompressInit, zstdDecompress, zstdDecompressEnd, otezip_zstd_init, zstdCompress, zstdEnd, otezip_zstd_bound, 0 },
 #endif
 #ifdef OTEZIP_ENABLE_LZFSE
-	{ OTEZIP_METHOD_LZFSE, lzfseDecompressInit, lzfseDecompress, lzfseDecompressEnd, otezip_lzfse_init, lzfseCompress, lzfseEnd, otezip_lzfse_bound },
+	{ OTEZIP_METHOD_LZFSE, lzfseDecompressInit, lzfseDecompress, lzfseDecompressEnd, otezip_lzfse_init, lzfseCompress, lzfseEnd, otezip_lzfse_bound, 0 },
 #endif
 #ifdef OTEZIP_ENABLE_LZMA
-	{ OTEZIP_METHOD_LZMA, lzmaDecompressInit, lzmaDecompress, lzmaDecompressEnd, otezip_lzma_init, lzmaCompress, lzmaEnd, otezip_lzma_bound },
+	{ OTEZIP_METHOD_LZMA, lzmaDecompressInit, lzmaDecompress, lzmaDecompressEnd, otezip_lzma_init, lzmaCompress, lzmaEnd, otezip_lzma_bound, 1 },
 #endif
 #ifdef OTEZIP_ENABLE_BROTLI
-	{ OTEZIP_METHOD_BROTLI, brotliDecompressInit, brotliDecompress, brotliDecompressEnd, otezip_brotli_init, brotliCompress, brotliEnd, otezip_brotli_bound },
+	{ OTEZIP_METHOD_BROTLI, brotliDecompressInit, brotliDecompress, brotliDecompressEnd, otezip_brotli_init, brotliCompress, brotliEnd, otezip_brotli_bound, 0 },
 #endif
-	{ 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL } /* sentinel */
+	{ 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0 } /* sentinel */
 };
 
 static const otezip_codec *otezip_codec_find(uint16_t method) {
@@ -595,8 +597,8 @@ static uint32_t otezip_compress_with(const otezip_codec *c, const uint8_t *in, s
 	return size;
 }
 
-/* load entire (uncompressed) file into memory and hand ownership to caller */
-static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out_buf, uint32_t *out_sz) {
+/* Validate entry e and read its compressed data into *out (caller frees) */
+static int otezip_read_compressed(zip_t *za, const struct otezip_entry *e, uint8_t **out) {
 	/* move to local header */
 	/* Validate local header offset against file size to avoid seeking
 	 * outside the file. Use 64-bit math for safety. */
@@ -675,13 +677,36 @@ static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out
 		free (cbuf);
 		return -1;
 	}
+	if (e->method == OTEZIP_METHOD_STORE && e->comp_size != e->uncomp_size) {
+		free (cbuf);
+		return -1;
+	}
+	*out = cbuf;
+	return 0;
+}
 
+/* Compare a computed CRC with the entry's: fatal with otezip_verify_crc,
+ * otherwise a warning. Returns 0 if the data is accepted. */
+static int otezip_check_crc(const struct otezip_entry *e, uint32_t computed_crc) {
+	if (computed_crc == e->crc32) {
+		return 0;
+	}
+	if (otezip_verify_crc) {
+		return -1;
+	}
+	fprintf (stderr, "Warning: CRC mismatch for '%s' (expected 0x%08x, got 0x%08x)\n", e->name? e->name: "<unknown>", e->crc32, computed_crc);
+	return 0;
+}
+
+/* load entire (uncompressed) file into memory and hand ownership to caller;
+ * used for methods whose decoders cannot stream their output */
+static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out_buf, uint32_t *out_sz) {
+	uint8_t *cbuf = NULL;
+	if (otezip_read_compressed (za, e, &cbuf) != 0) {
+		return -1;
+	}
 	uint8_t *ubuf = NULL;
 	if (e->method == OTEZIP_METHOD_STORE) {
-		if (e->comp_size != e->uncomp_size) {
-			free (cbuf);
-			return -1;
-		}
 		ubuf = cbuf;
 		cbuf = NULL;
 	}
@@ -708,19 +733,9 @@ static int otezip_extract_entry(zip_t *za, struct otezip_entry *e, uint8_t **out
 		}
 	}
 	free (cbuf);
-	/* Verify CRC32 of uncompressed data if requested or warn on mismatch. */
-	{
-		uint32_t computed_crc = otezip_crc32 (0, ubuf, e->uncomp_size);
-		if (computed_crc != e->crc32) {
-			if (otezip_verify_crc) {
-				/* On strict verify, treat mismatch as fatal for this entry. */
-				free (ubuf);
-				return -1;
-			} else {
-				/* Non-strict mode: warn but continue. */
-				fprintf (stderr, "Warning: CRC mismatch for '%s' (expected 0x%08x, got 0x%08x)\n", e->name? e->name: "<unknown>", e->crc32, computed_crc);
-			}
-		}
+	if (otezip_check_crc (e, otezip_crc32 (0, ubuf, e->uncomp_size)) != 0) {
+		free (ubuf);
+		return -1;
 	}
 
 	*out_buf = ubuf;
@@ -1137,24 +1152,86 @@ zip_int64_t zip_name_locate(zip_t *za, const char *fname, zip_flags_t flags) {
 	return -1;
 }
 
+/* Streaming state of an open entry: the compressed data stays in memory
+ * (bounded by the archive size) and is decoded on demand by zip_fread. */
+typedef struct {
+	const struct otezip_entry *e;
+	const otezip_codec *codec; /* NULL for STORE */
+	uint8_t *cbuf;
+	z_stream strm;
+	uint32_t crc;
+	int ended; /* decoder reported the end of the stream */
+	int failed;
+} otezip_stream;
+
+static void otezip_stream_free(otezip_stream *st) {
+	if (st->codec) {
+		st->codec->dec_end (&st->strm);
+	}
+	free (st->cbuf);
+	free (st);
+}
+
+/* Once all declared bytes were produced, require the stream to end exactly
+ * there and the CRC to match. Returns 0 if the entry is valid. */
+static int otezip_stream_finish(otezip_stream *st) {
+	if (st->codec && !st->ended) {
+		uint8_t extra;
+		st->strm.next_out = &extra;
+		st->strm.avail_out = 1;
+		int ret = st->codec->dec (&st->strm, Z_FINISH);
+		if (ret != Z_STREAM_END || st->strm.avail_out != 1) {
+			return -1; /* more data than declared, or a corrupt stream */
+		}
+	}
+	return otezip_check_crc (st->e, st->crc);
+}
+
 zip_file_t *zip_fopen_index(zip_t *za, zip_uint64_t index, zip_flags_t flags) {
 	(void)flags;
 	if (!otezip_is_valid (za) || index >= za->n_entries) {
 		return NULL;
 	}
-	uint8_t *buf = NULL;
-	uint32_t sz = 0;
-	if (otezip_extract_entry (za, &za->entries[index], &buf, &sz) != 0) {
-		return NULL;
-	}
-	zip_file_t *zf = (zip_file_t *)malloc (sizeof (zip_file_t));
+	struct otezip_entry *e = &za->entries[index];
+	const otezip_codec *codec = otezip_codec_find (e->method);
+	zip_file_t *zf = (zip_file_t *)calloc (1, sizeof (zip_file_t));
 	if (!zf) {
-		free (buf);
 		return NULL;
 	}
-	zf->data = buf;
-	zf->size = sz;
-	zf->pos = 0;
+	zf->size = e->uncomp_size;
+	if (e->method != OTEZIP_METHOD_STORE && !(codec && codec->streams)) {
+		/* Decoder cannot stream: decompress the whole entry now */
+		if (otezip_extract_entry (za, e, &zf->data, &zf->size) != 0) {
+			free (zf);
+			return NULL;
+		}
+		return zf;
+	}
+	otezip_stream *st = (otezip_stream *)calloc (1, sizeof (otezip_stream));
+	if (!st || otezip_read_compressed (za, e, &st->cbuf) != 0) {
+		free (st);
+		free (zf);
+		return NULL;
+	}
+	st->e = e;
+	if (e->method != OTEZIP_METHOD_STORE) {
+		st->strm.next_in = st->cbuf;
+		st->strm.avail_in = e->comp_size;
+		if (codec->dec_init (&st->strm) != Z_OK) {
+			free (st->cbuf);
+			free (st);
+			free (zf);
+			return NULL;
+		}
+		st->codec = codec;
+	}
+	zf->stream = st;
+	/* Empty entries are complete right away; validate them at open */
+	if (zf->size == 0 && otezip_stream_finish (st) != 0) {
+		otezip_stream_free (st);
+		free (zf);
+		return NULL;
+	}
 	return zf;
 }
 
@@ -1162,14 +1239,63 @@ int zip_fclose(zip_file_t *zf) {
 	if (!zf) {
 		return -1;
 	}
+	if (zf->stream) {
+		otezip_stream_free ((otezip_stream *)zf->stream);
+	}
 	free (zf->data);
 	free (zf);
 	return 0;
 }
 
+/* Decode up to nbytes of a streamed entry into buf */
+static zip_int64_t otezip_stream_read(zip_file_t *zf, uint8_t *buf, zip_uint64_t nbytes) {
+	otezip_stream *st = (otezip_stream *)zf->stream;
+	if (st->failed) {
+		return -1;
+	}
+	zip_uint64_t remaining = zf->size - zf->pos;
+	if (nbytes > remaining) {
+		nbytes = remaining;
+	}
+	if (nbytes > UINT_MAX) {
+		nbytes = UINT_MAX;
+	}
+	if (nbytes == 0) {
+		return 0;
+	}
+	zip_uint64_t got = nbytes;
+	if (!st->codec) {
+		memcpy (buf, st->cbuf + zf->pos, (size_t)nbytes);
+	} else {
+		st->strm.next_out = buf;
+		st->strm.avail_out = (uInt)nbytes;
+		int ret = st->codec->dec (&st->strm, Z_FINISH);
+		got = nbytes - st->strm.avail_out;
+		if (ret == Z_STREAM_END) {
+			st->ended = 1;
+		}
+		/* No progress, a decoder error, or the stream ended short */
+		if ((ret != Z_OK && ret != Z_BUF_ERROR && ret != Z_STREAM_END) || got == 0 ||
+			(st->ended && zf->pos + got < zf->size)) {
+			st->failed = 1;
+			return -1;
+		}
+	}
+	st->crc = otezip_crc32 (st->crc, buf, (size_t)got);
+	zf->pos += got;
+	if (zf->pos == zf->size && otezip_stream_finish (st) != 0) {
+		st->failed = 1;
+		return -1;
+	}
+	return (zip_int64_t)got;
+}
+
 zip_int64_t zip_fread(zip_file_t *zf, void *buf, zip_uint64_t nbytes) {
 	if (!zf || !buf) {
 		return -1;
+	}
+	if (zf->stream) {
+		return otezip_stream_read (zf, (uint8_t *)buf, nbytes);
 	}
 	if (zf->pos >= zf->size) {
 		return 0;

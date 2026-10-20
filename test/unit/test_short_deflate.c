@@ -44,11 +44,18 @@ int main(void) {
 		failed = 1;
 	} else {
 		otezip_verify_crc = 1;
+		/* The error may surface at open or while reading the entry */
 		zip_file_t *zf = zip_fopen_index (za, 0, 0);
 		if (zf) {
-			fprintf (stderr, "FAIL: deflate output shorter than its declared size was accepted\n");
+			char buf[16];
+			zip_int64_t n;
+			while ((n = zip_fread (zf, buf, sizeof (buf))) > 0) {
+			}
+			if (n == 0) {
+				fprintf (stderr, "FAIL: deflate output shorter than its declared size was accepted\n");
+				failed = 1;
+			}
 			zip_fclose (zf);
-			failed = 1;
 		}
 		zip_close (za);
 	}
